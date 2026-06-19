@@ -119,9 +119,7 @@
                                 </Grid.ColumnDefinitions>
                                 <GridView x:Name="AppProfileTabs" Grid.Column="0"
                                           SelectionMode="Single"
-                                          SelectionChanged="AppProfileTabs_SelectionChanged"
-                                          IsItemClickEnabled="True"
-                                          ItemClick="AppProfileTabs_ItemClick">
+                                          SelectionChanged="AppProfileTabs_SelectionChanged">
                                     <GridView.ItemTemplate>
                                         <DataTemplate>
                                             <StackPanel Orientation="Horizontal" Spacing="6" Padding="4">
@@ -198,7 +196,8 @@
                                                 Background="White"
                                                 BorderBrush="{ThemeResource CardStrokeColorDefaultBrush}"
                                                 BorderThickness="1">
-                                            <Canvas x:Name="RingCanvas"
+                                            <Canvas x:Name="RingCanvas" Width="400" Height="400"
+                                                    HorizontalAlignment="Center" VerticalAlignment="Center"
                                                     PointerPressed="RingCanvas_PointerPressed"
                                                     PointerMoved="RingCanvas_PointerMoved"
                                                     PointerReleased="RingCanvas_PointerReleased"

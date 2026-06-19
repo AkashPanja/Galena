@@ -45,6 +45,7 @@ namespace Galena_Action_Ring
         // App profiles
         private readonly List<RingProfile> _appProfiles = new();
         private int _selectedProfileIndex;
+        private bool _suppressTabChange;
 
         // Canvas sizing
         private const double ActualOsdSize = 400;
@@ -420,9 +421,11 @@ namespace Galena_Action_Ring
         private void NavView_ItemInvoked(NavigationView sender, NavigationViewItemInvokedEventArgs args)
         {
             var tag = (args.InvokedItemContainer as NavigationViewItem)?.Tag as string;
-            BluetoothPage.Visibility = tag == "Bluetooth" ? Visibility.Visible : Visibility.Collapsed;
+            var isBT = tag == "Bluetooth";
+            BluetoothPage.Visibility = isBT ? Visibility.Visible : Visibility.Collapsed;
             ConfigurePage.Visibility = tag == "Configure" ? Visibility.Visible : Visibility.Collapsed;
-            DevicesTitle.Text = tag == "Bluetooth" ? "Devices" : "";
+            DevicesTitle.Visibility = isBT ? Visibility.Visible : Visibility.Collapsed;
+            DevicesTitle.Text = isBT ? "Devices" : "";
         }
 
         #region Canvas Editor
@@ -448,6 +451,7 @@ namespace Galena_Action_Ring
 
         private void RefreshAppProfileTabs()
         {
+            _suppressTabChange = true;
             AppProfileTabs.Items.Clear();
             for (int i = 0; i < _appProfiles.Count; i++)
             {
@@ -465,26 +469,15 @@ namespace Galena_Action_Ring
             }
             if (_selectedProfileIndex >= 0 && _selectedProfileIndex < AppProfileTabs.Items.Count)
                 AppProfileTabs.SelectedIndex = _selectedProfileIndex;
+            _suppressTabChange = false;
         }
 
         private void AppProfileTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (_suppressTabChange) return;
             if (AppProfileTabs.SelectedIndex < 0) return;
             _selectedProfileIndex = AppProfileTabs.SelectedIndex;
             LoadCurrentProfile();
-        }
-
-        private void AppProfileTabs_ItemClick(object sender, ItemClickEventArgs e)
-        {
-            if (e.ClickedItem is ProfileTabItem tab)
-            {
-                var idx = _appProfiles.IndexOf(tab.Profile);
-                if (idx >= 0)
-                {
-                    _selectedProfileIndex = idx;
-                    LoadCurrentProfile();
-                }
-            }
         }
 
         private void AddAppProfileBtn_Click(object sender, RoutedEventArgs e)
@@ -533,7 +526,6 @@ namespace Galena_Action_Ring
             RingCanvas.Children.Clear();
             _canvasElements.Clear();
             var count = _canvasNodes.Count;
-            if (count == 0) return;
 
             var radius = 120.0 * Scale;
             var circleSize = 56.0 * Scale;
@@ -541,53 +533,57 @@ namespace Galena_Action_Ring
             var labelFontSize = 13.0;
             var cx = CanvasViewport / 2;
             var cy = CanvasViewport / 2;
-            var step = 360.0 / count;
 
-            for (int i = 0; i < count; i++)
+            if (count > 0)
             {
-                var angle = i * step * Math.PI / 180;
-                var x = cx + radius * Math.Sin(angle);
-                var y = cy - radius * Math.Cos(angle);
+                var step = 360.0 / count;
 
-                var grid = new Grid { Width = circleSize, Height = circleSize };
-                Canvas.SetLeft(grid, x - circleSize / 2);
-                Canvas.SetTop(grid, y - circleSize / 2);
-
-                var ellipse = new Ellipse { Width = circleSize, Height = circleSize, Fill = NodeFill };
-                if (i == _selectedCanvasIndex)
+                for (int i = 0; i < count; i++)
                 {
-                    ellipse.Stroke = NodeActiveStroke;
-                    ellipse.StrokeThickness = 3;
+                    var angle = i * step * Math.PI / 180;
+                    var x = cx + radius * Math.Sin(angle);
+                    var y = cy - radius * Math.Cos(angle);
+
+                    var grid = new Grid { Width = circleSize, Height = circleSize };
+                    Canvas.SetLeft(grid, x - circleSize / 2);
+                    Canvas.SetTop(grid, y - circleSize / 2);
+
+                    var ellipse = new Ellipse { Width = circleSize, Height = circleSize, Fill = NodeFill };
+                    if (i == _selectedCanvasIndex)
+                    {
+                        ellipse.Stroke = NodeActiveStroke;
+                        ellipse.StrokeThickness = 3;
+                    }
+                    grid.Children.Add(ellipse);
+
+                    var icon = new FontIcon
+                    {
+                        FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                        Glyph = _canvasNodes[i].Glyph,
+                        FontSize = fontSize,
+                        Foreground = NodeForeground,
+                    };
+                    grid.Children.Add(icon);
+                    RingCanvas.Children.Add(grid);
+                    _canvasElements.Add(grid);
+
+                    var label = new TextBlock
+                    {
+                        Text = _canvasNodes[i].Label,
+                        FontSize = labelFontSize,
+                        Foreground = NodeLabelBrush,
+                        TextAlignment = TextAlignment.Center,
+                        MaxWidth = 100,
+                        TextWrapping = TextWrapping.NoWrap,
+                        TextTrimming = TextTrimming.CharacterEllipsis,
+                    };
+                    var labelDist = circleSize / 2 + 10;
+                    var lx = cx + (radius + labelDist) * Math.Sin(angle);
+                    var ly = cy - (radius + labelDist) * Math.Cos(angle);
+                    Canvas.SetLeft(label, lx - 50);
+                    Canvas.SetTop(label, ly - 8);
+                    RingCanvas.Children.Add(label);
                 }
-                grid.Children.Add(ellipse);
-
-                var icon = new FontIcon
-                {
-                    FontFamily = new FontFamily("Segoe MDL2 Assets"),
-                    Glyph = _canvasNodes[i].Glyph,
-                    FontSize = fontSize,
-                    Foreground = NodeForeground,
-                };
-                grid.Children.Add(icon);
-                RingCanvas.Children.Add(grid);
-                _canvasElements.Add(grid);
-
-                var label = new TextBlock
-                {
-                    Text = _canvasNodes[i].Label,
-                    FontSize = labelFontSize,
-                    Foreground = NodeLabelBrush,
-                    TextAlignment = TextAlignment.Center,
-                    MaxWidth = 100,
-                    TextWrapping = TextWrapping.NoWrap,
-                    TextTrimming = TextTrimming.CharacterEllipsis,
-                };
-                var labelDist = circleSize / 2 + 10;
-                var lx = cx + (radius + labelDist) * Math.Sin(angle);
-                var ly = cy - (radius + labelDist) * Math.Cos(angle);
-                Canvas.SetLeft(label, lx - 50);
-                Canvas.SetTop(label, ly - 8);
-                RingCanvas.Children.Add(label);
             }
 
             var ccs = 24.0 * Scale;
