@@ -1,6 +1,7 @@
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
+using Microsoft.UI.Xaml.Shapes;
 using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
@@ -25,8 +26,11 @@ namespace Galena_Action_Ring
         private bool _isConnected;
         private bool _manualDisconnect;
 
-        private readonly ObservableCollection<RingNode> _configNodes = new();
-        private bool _isEditing; // prevent re-entrant handler during editor updates
+        private readonly ObservableCollection<SlotItem> _slotItems = new();
+        private bool _isEditing;
+        private int _selectedSlotIndex = -1;
+        private static readonly Color _white = Color.FromArgb(180, 255, 255, 255);
+        private static readonly Color _black = Color.FromArgb(255, 0, 0, 0);
 
         public ObservableCollection<DeviceItem> DeviceItems { get; } = new();
 
@@ -58,9 +62,9 @@ namespace Galena_Action_Ring
 
             _trayService.Setup(this);
 
-            NodeActionTypeBox.ItemsSource = Enum.GetValues<ActionType>();
-            NodeListBox.ItemsSource = _configNodes;
-            LoadConfigFromProfile(OsdService.Instance.CurrentProfile);
+            SlotActionTypeBox.ItemsSource = Enum.GetValues<ActionType>();
+            SlotListBox.ItemsSource = _slotItems;
+            InitSlots();
 
             _ = RefreshDeviceListAsync();
             StartPollTimer();
@@ -406,115 +410,245 @@ namespace Galena_Action_Ring
             DevicesTitle.Text = tag == "Bluetooth" ? "Devices" : "";
         }
 
-        private void LoadConfigFromProfile(RingProfile profile)
-    {
-        _configNodes.Clear();
-        foreach (var node in profile.Nodes)
-            _configNodes.Add(node);
-        ProfileNameBox.Text = profile.Name;
-        NodeListBox.SelectedItem = null;
-    }
-
-    private void SaveProfile_Click(object sender, RoutedEventArgs e)
-    {
-        var profile = OsdService.Instance.CurrentProfile;
-        profile.Name = ProfileNameBox.Text;
-        profile.Nodes = _configNodes.ToList();
-        ProfileService.SaveProfile(profile);
-        OsdService.Instance.ReloadProfile();
-    }
-
-    private void LoadProfile_Click(object sender, RoutedEventArgs e)
-    {
-        var profiles = ProfileService.ListProfiles();
-        if (profiles.Length == 0) return;
-
-        var dialog = new ContentDialog
+        private void InitSlots()
         {
-            Title = "Load Profile",
-            Content = "Default profile will be loaded.",
-            CloseButtonText = "OK",
-            XamlRoot = AppRoot.XamlRoot
+            var profile = OsdService.Instance.CurrentProfile;
+            _slotItems.Clear();
+            for (int i = 0; i < 8; i++)
+            {
+                var node = i < profile.Nodes.Count ? profile.Nodes[i] : new RingNode();
+                _slotItems.Add(new SlotItem(i, node));
+            }
+            ProfileNameBox.Text = profile.Name;
+            _selectedSlotIndex = -1;
+            SlotListBox.SelectedItem = null;
+            UpdatePreview();
+        }
+
+        private void SaveProfile_Click(object sender, RoutedEventArgs e)
+        {
+            var profile = OsdService.Instance.CurrentProfile;
+            profile.Name = ProfileNameBox.Text;
+            profile.Nodes = _slotItems.Select(s => s.Node).ToList();
+            ProfileService.SaveProfile(profile);
+            OsdService.Instance.ReloadProfile(profile.Name);
+        }
+
+        private void LoadProfile_Click(object sender, RoutedEventArgs e)
+        {
+            var profiles = ProfileService.ListProfiles();
+            var target = profiles.Length > 0 ? profiles[0] : "Default";
+
+            var profile = ProfileService.LoadProfile(target) ?? ProfileService.CreateDefault();
+            OsdService.Instance.CurrentProfile = profile;
+            InitSlots();
+            OsdService.Instance.ReloadProfile(profile.Name);
+        }
+
+        private void SlotList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (e.AddedItems.FirstOrDefault() is SlotItem slot)
+            {
+                _selectedSlotIndex = slot.Index;
+                _isEditing = true;
+                SlotLabelBox.Text = slot.Node.Label;
+                SlotGlyphBox.Text = slot.Node.Glyph;
+                SlotGlyphPreview.Glyph = slot.Node.Glyph;
+                SlotActionTypeBox.SelectedItem = slot.Node.ActionType;
+                UpdateActionDataPlaceholder(slot.Node.ActionType);
+                SlotActionDataBox.Text = slot.Node.ActionData;
+                _isEditing = false;
+            }
+            else
+            {
+                _selectedSlotIndex = -1;
+                ClearEditor();
+            }
+        }
+
+        private void SlotLabelBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_isEditing || _selectedSlotIndex < 0) return;
+            _slotItems[_selectedSlotIndex].Node.Label = SlotLabelBox.Text;
+        }
+
+        private void SlotGlyphBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_isEditing || _selectedSlotIndex < 0) return;
+            _slotItems[_selectedSlotIndex].Node.Glyph = SlotGlyphBox.Text;
+            SlotGlyphPreview.Glyph = SlotGlyphBox.Text;
+            UpdatePreview();
+        }
+
+        private void SlotActionTypeBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_isEditing || _selectedSlotIndex < 0) return;
+            if (SlotActionTypeBox.SelectedItem is ActionType at)
+            {
+                _slotItems[_selectedSlotIndex].Node.ActionType = at;
+                UpdateActionDataPlaceholder(at);
+            }
+        }
+
+        private void SlotActionDataBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_isEditing || _selectedSlotIndex < 0) return;
+            _slotItems[_selectedSlotIndex].Node.ActionData = SlotActionDataBox.Text;
+        }
+
+        private void ClearEditor()
+        {
+            SlotLabelBox.Text = "";
+            SlotGlyphBox.Text = "";
+            SlotGlyphPreview.Glyph = "";
+            SlotActionTypeBox.SelectedIndex = -1;
+            SlotActionDataBox.Text = "";
+        }
+
+        private void UpdateActionDataPlaceholder(ActionType at)
+        {
+            SlotActionDataBox.PlaceholderText = at switch
+            {
+                ActionType.LaunchApp => "Path to .exe or shortcut",
+                ActionType.OpenUrl => "https://...",
+                ActionType.TextExpansion => "Text snippet to paste",
+                _ => ""
+            };
+        }
+
+        #region Icon Picker
+
+        private static readonly (string Glyph, string Label)[] CommonIcons =
+        {
+            ("\uE774", "Globe"), ("\uE8B9", "Video"), ("\uE995", "Vol+"), ("\uE994", "Vol-"),
+            ("\uE74F", "Mute"), ("\uE767", "Mute2"), ("\uE706", "Bright+"), ("\uE708", "Bright-"),
+            ("\uE768", "Play"), ("\uE769", "Pause"), ("\uE7E8", "Next"), ("\uE7E9", "Prev"),
+            ("\uEC4F", "Music"), ("\uE713", "Gear"), ("\uE80F", "Home"), ("\uE721", "Search"),
+            ("\uE722", "Camera"), ("\uE72E", "Lock"), ("\uE702", "BT"), ("\uE88E", "USB"),
+            ("\uE701", "WiFi"), ("\uE7BE", "Light"), ("\uE73E", "Check"), ("\uE711", "Close"),
+            ("\uE710", "Add"), ("\uE74D", "Delete"), ("\uE70F", "Edit"), ("\uE72D", "Share"),
+            ("\uE734", "Star"), ("\uE72C", "Refresh"), ("\uE736", "Down"), ("\uE735", "Up"),
+            ("\uE121", "Clock"), ("\uE787", "Cal"), ("\uE716", "People"), ("\uE717", "Phone"),
+            ("\uE714", "Video2"), ("\uE71B", "Link"), ("\uE8B7", "Folder"), ("\uE7C3", "File"),
+            ("\uE74E", "Save"), ("\uE8EF", "Calc"),
         };
-        _ = dialog.ShowAsync();
 
-        var profile = ProfileService.LoadProfile("Default") ?? ProfileService.CreateDefault();
-        OsdService.Instance.CurrentProfile = profile;
-        LoadConfigFromProfile(profile);
-        OsdService.Instance.ReloadProfile();
-    }
-
-    private void AddNode_Click(object sender, RoutedEventArgs e)
-    {
-        var node = new RingNode { Glyph = "\uE774", Label = "New Node" };
-        _configNodes.Add(node);
-        NodeListBox.SelectedItem = node;
-    }
-
-    private void RemoveNode_Click(object sender, RoutedEventArgs e)
-    {
-        if (NodeListBox.SelectedItem is RingNode node)
+        private void IconPickerBtn_Click(object sender, RoutedEventArgs e)
         {
-            _configNodes.Remove(node);
-            NodeListBox.SelectedItem = null;
-        }
-    }
+            var flyout = new Flyout();
+            var grid = new Grid();
+            var columns = 6;
+            var rows = (int)Math.Ceiling((double)CommonIcons.Length / columns);
 
-    private void NodeList_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        RemoveNodeBtn.IsEnabled = NodeListBox.SelectedItem != null;
-        if (NodeListBox.SelectedItem is RingNode node)
+            for (int i = 0; i < rows; i++)
+                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) });
+            for (int i = 0; i < columns; i++)
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
+
+            for (int i = 0; i < CommonIcons.Length; i++)
+            {
+                var btn = new Button
+                {
+                    Width = 44, Height = 44,
+                    Content = new FontIcon
+                    {
+                        FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                        Glyph = CommonIcons[i].Glyph,
+                        FontSize = 18,
+                    },
+                    Tag = CommonIcons[i].Glyph,
+                    Margin = new Thickness(2),
+                };
+                var glyph = CommonIcons[i].Glyph;
+                btn.Click += (s, args) =>
+                {
+                    if (_selectedSlotIndex >= 0)
+                    {
+                        _slotItems[_selectedSlotIndex].Node.Glyph = glyph;
+                        SlotGlyphBox.Text = glyph;
+                        SlotGlyphPreview.Glyph = glyph;
+                        UpdatePreview();
+                    }
+                    flyout.Hide();
+                };
+                Grid.SetRow(btn, i / columns);
+                Grid.SetColumn(btn, i % columns);
+                grid.Children.Add(btn);
+            }
+
+            var scroll = new ScrollViewer { Content = grid, Width = 310, Height = 250 };
+            flyout.Content = scroll;
+            IconPickerBtn.Flyout = flyout;
+            flyout.ShowAt(IconPickerBtn);
+        }
+
+        #endregion
+
+        #region Live Preview
+
+        private void UpdatePreview()
         {
-            _isEditing = true;
-            NodeLabelBox.Text = node.Label;
-            NodeGlyphBox.Text = node.Glyph;
-            NodeGlyphPreview.Glyph = node.Glyph;
-            NodeActionTypeBox.SelectedItem = node.ActionType;
-            NodeActionDataBox.Text = node.ActionData;
-            _isEditing = false;
+            PreviewContainer.Children.Clear();
+            var radius = 60.0;
+            var count = 8;
+            var step = 360.0 / count;
+
+            for (int i = 0; i < count; i++)
+            {
+                var angle = i * step * Math.PI / 180;
+                var cx = 90.0 + radius * Math.Sin(angle) - 14;
+                var cy = 90.0 - radius * Math.Cos(angle) - 14;
+
+                var ellipse = new Ellipse
+                {
+                    Width = 28, Height = 28,
+                    Fill = new SolidColorBrush(_white),
+                };
+                Canvas.SetLeft(ellipse, cx);
+                Canvas.SetTop(ellipse, cy);
+                PreviewContainer.Children.Add(ellipse);
+
+                var glyph = i < _slotItems.Count ? _slotItems[i].Node.Glyph : "";
+                var icon = new FontIcon
+                {
+                    FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                    Glyph = glyph,
+                    FontSize = 14,
+                    Foreground = new SolidColorBrush(_black),
+                };
+                Canvas.SetLeft(icon, cx + 7);
+                Canvas.SetTop(icon, cy + 7);
+                PreviewContainer.Children.Add(icon);
+            }
         }
-        else
+
+        #endregion
+
+    }
+
+    public class SlotItem : INotifyPropertyChanged
+    {
+        public int Index { get; }
+        public string SlotLabel => (Index + 1).ToString();
+        public RingNode Node { get; }
+
+        public SlotItem(int index, RingNode node)
         {
-            NodeLabelBox.Text = "";
-            NodeGlyphBox.Text = "";
-            NodeGlyphPreview.Glyph = "";
-            NodeActionTypeBox.SelectedIndex = -1;
-            NodeActionDataBox.Text = "";
+            Index = index;
+            Node = node;
+            Node.PropertyChanged += (_, _) =>
+            {
+                OnPropertyChanged(nameof(Glyph));
+                OnPropertyChanged(nameof(Label));
+            };
         }
-    }
 
-    private void NodeLabelBox_TextChanged(object sender, TextChangedEventArgs e)
-    {
-        if (_isEditing || NodeListBox.SelectedItem is not RingNode node) return;
-        node.Label = NodeLabelBox.Text;
-        var index = _configNodes.IndexOf(node);
-        if (index >= 0)
-        {
-            _configNodes.RemoveAt(index);
-            _configNodes.Insert(index, node);
-        }
-    }
+        public string Glyph => Node.Glyph;
+        public string Label => Node.Label;
 
-    private void NodeGlyphBox_TextChanged(object sender, TextChangedEventArgs e)
-    {
-        if (_isEditing || NodeListBox.SelectedItem is not RingNode node) return;
-        node.Glyph = NodeGlyphBox.Text;
-        NodeGlyphPreview.Glyph = node.Glyph;
-    }
-
-    private void NodeActionTypeBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-    {
-        if (_isEditing || NodeListBox.SelectedItem is not RingNode node) return;
-        if (NodeActionTypeBox.SelectedItem is ActionType at)
-            node.ActionType = at;
-    }
-
-    private void NodeActionDataBox_TextChanged(object sender, TextChangedEventArgs e)
-    {
-        if (_isEditing || NodeListBox.SelectedItem is not RingNode node) return;
-        node.ActionData = NodeActionDataBox.Text;
-    }
-
+        public event PropertyChangedEventHandler? PropertyChanged;
+        private void OnPropertyChanged([CallerMemberName] string? name = null) =>
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
     }
 
     public enum DeviceType { Usb, Bluetooth, Unknown }

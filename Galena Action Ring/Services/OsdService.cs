@@ -37,10 +37,10 @@ public class OsdService
         _timeoutTimer.Tick += (_, _) => Hide();
     }
 
-    public void ReloadProfile()
+    public void ReloadProfile(string profileName = "Default")
     {
         if (_osdWindow == null) return;
-        CurrentProfile = ProfileService.LoadProfile("Default") ?? ProfileService.CreateDefault();
+        CurrentProfile = ProfileService.LoadProfile(profileName) ?? ProfileService.CreateDefault();
         _osdWindow.LoadNodes(CurrentProfile.Nodes, CurrentProfile.Radius);
     }
 

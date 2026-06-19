@@ -56,7 +56,9 @@ internal static class WindowsSystemDispatcherQueueHelper
                 threadType = 2,
                 apartmentType = 2,
             };
-            CreateDispatcherQueueController(options, ref _dispatcherQueueController);
+            object controller = null!;
+            CreateDispatcherQueueController(options, ref controller);
+            _dispatcherQueueController = controller;
         }
     }
 }
