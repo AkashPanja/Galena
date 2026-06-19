@@ -85,6 +85,12 @@
                     </NavigationViewItem.Icon>
                 </NavigationViewItem>
 
+                <NavigationViewItem x:Name="NavConfigure" Tag="Configure" Content="Configure">
+                    <NavigationViewItem.Icon>
+                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE713;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+
             </NavigationView.MenuItems>
 
             <Grid>
@@ -97,6 +103,64 @@
 
                 <ScrollViewer Grid.Row="1">
                     <Grid x:Name="ContentArea" HorizontalAlignment="Stretch" Margin="24,0,24,0">
+
+                        <!-- ==================== CONFIGURE ==================== -->
+                        <Grid x:Name="ConfigurePage" Visibility="Collapsed">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <StackPanel Grid.Row="0" Orientation="Horizontal" Spacing="8" Margin="0,0,0,12">
+                                <TextBox x:Name="ProfileNameBox" Header="Profile" Width="200" Text="Default" />
+                                <Button x:Name="SaveProfileBtn" Content="Save" Margin="0,24,0,0" Click="SaveProfile_Click" />
+                                <Button x:Name="LoadProfileBtn" Content="Load" Margin="0,24,0,0" Click="LoadProfile_Click" />
+                            </StackPanel>
+
+                            <Grid Grid.Row="1" ColumnDefinitions="*,Auto,*">
+                                <!-- Node List -->
+                                <Border Grid.Column="0" Style="{StaticResource SettingsCardStyle}" Padding="12">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="Auto" />
+                                            <RowDefinition Height="*" />
+                                        </Grid.RowDefinitions>
+
+                                        <TextBlock Grid.Row="0" Text="Nodes" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8" />
+                                        <StackPanel Grid.Row="1" Orientation="Horizontal" Spacing="8" Margin="0,0,0,8">
+                                            <Button Content="+ Add" Click="AddNode_Click" />
+                                            <Button x:Name="RemoveNodeBtn" Content="− Remove" IsEnabled="False" Click="RemoveNode_Click" />
+                                        </StackPanel>
+                                        <ListView x:Name="NodeListBox" Grid.Row="2"
+                                                  CanReorderItems="True" AllowDrop="True"
+                                                  SelectionMode="Single"
+                                                  SelectionChanged="NodeList_SelectionChanged"
+                                                  DisplayMemberPath="Label" />
+                                    </Grid>
+                                </Border>
+
+                                <!-- Node Editor -->
+                                <Border Grid.Column="2" Style="{StaticResource SettingsCardStyle}" Padding="12">
+                                    <StackPanel Spacing="8">
+                                        <TextBlock Text="Edit Node" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,4" />
+                                        <TextBox x:Name="NodeLabelBox" Header="Label" TextChanged="NodeLabelBox_TextChanged" />
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="*" />
+                                                <ColumnDefinition Width="Auto" />
+                                            </Grid.ColumnDefinitions>
+                                            <TextBox x:Name="NodeGlyphBox" Grid.Column="0" Header="Glyph" TextChanged="NodeGlyphBox_TextChanged" />
+                                            <FontIcon x:Name="NodeGlyphPreview" Grid.Column="1"
+                                                      FontFamily="Segoe MDL2 Assets" FontSize="32"
+                                                      Margin="8,24,0,0" VerticalAlignment="Center" />
+                                        </Grid>
+                                        <ComboBox x:Name="NodeActionTypeBox" Header="Action" Width="220" SelectionChanged="NodeActionTypeBox_SelectionChanged" />
+                                        <TextBox x:Name="NodeActionDataBox" Header="Action Data" PlaceholderText="Path, URL, or text snippet" TextChanged="NodeActionDataBox_TextChanged" />
+                                    </StackPanel>
+                                </Border>
+                            </Grid>
+                        </Grid>
 
                         <!-- ==================== DEVICES ==================== -->
                         <Grid x:Name="BluetoothPage" Visibility="Visible">

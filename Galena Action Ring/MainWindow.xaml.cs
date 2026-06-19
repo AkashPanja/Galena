@@ -25,6 +25,9 @@ namespace Galena_Action_Ring
         private bool _isConnected;
         private bool _manualDisconnect;
 
+        private readonly ObservableCollection<RingNode> _configNodes = new();
+        private bool _isEditing; // prevent re-entrant handler during editor updates
+
         public ObservableCollection<DeviceItem> DeviceItems { get; } = new();
 
         public MainWindow()
@@ -54,6 +57,10 @@ namespace Galena_Action_Ring
             };
 
             _trayService.Setup(this);
+
+            NodeActionTypeBox.ItemsSource = Enum.GetValues<ActionType>();
+            NodeListBox.ItemsSource = _configNodes;
+            LoadConfigFromProfile(OsdService.Instance.CurrentProfile);
 
             _ = RefreshDeviceListAsync();
             StartPollTimer();
@@ -395,8 +402,119 @@ namespace Galena_Action_Ring
         {
             var tag = (args.InvokedItemContainer as NavigationViewItem)?.Tag as string;
             BluetoothPage.Visibility = tag == "Bluetooth" ? Visibility.Visible : Visibility.Collapsed;
-            DevicesTitle.Text = "Devices";
+            ConfigurePage.Visibility = tag == "Configure" ? Visibility.Visible : Visibility.Collapsed;
+            DevicesTitle.Text = tag == "Bluetooth" ? "Devices" : "";
         }
+
+        private void LoadConfigFromProfile(RingProfile profile)
+    {
+        _configNodes.Clear();
+        foreach (var node in profile.Nodes)
+            _configNodes.Add(node);
+        ProfileNameBox.Text = profile.Name;
+        NodeListBox.SelectedItem = null;
+    }
+
+    private void SaveProfile_Click(object sender, RoutedEventArgs e)
+    {
+        var profile = OsdService.Instance.CurrentProfile;
+        profile.Name = ProfileNameBox.Text;
+        profile.Nodes = _configNodes.ToList();
+        ProfileService.SaveProfile(profile);
+        OsdService.Instance.ReloadProfile();
+    }
+
+    private void LoadProfile_Click(object sender, RoutedEventArgs e)
+    {
+        var profiles = ProfileService.ListProfiles();
+        if (profiles.Length == 0) return;
+
+        var dialog = new ContentDialog
+        {
+            Title = "Load Profile",
+            Content = "Default profile will be loaded.",
+            CloseButtonText = "OK",
+            XamlRoot = AppRoot.XamlRoot
+        };
+        _ = dialog.ShowAsync();
+
+        var profile = ProfileService.LoadProfile("Default") ?? ProfileService.CreateDefault();
+        OsdService.Instance.CurrentProfile = profile;
+        LoadConfigFromProfile(profile);
+        OsdService.Instance.ReloadProfile();
+    }
+
+    private void AddNode_Click(object sender, RoutedEventArgs e)
+    {
+        var node = new RingNode { Glyph = "\uE774", Label = "New Node" };
+        _configNodes.Add(node);
+        NodeListBox.SelectedItem = node;
+    }
+
+    private void RemoveNode_Click(object sender, RoutedEventArgs e)
+    {
+        if (NodeListBox.SelectedItem is RingNode node)
+        {
+            _configNodes.Remove(node);
+            NodeListBox.SelectedItem = null;
+        }
+    }
+
+    private void NodeList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        RemoveNodeBtn.IsEnabled = NodeListBox.SelectedItem != null;
+        if (NodeListBox.SelectedItem is RingNode node)
+        {
+            _isEditing = true;
+            NodeLabelBox.Text = node.Label;
+            NodeGlyphBox.Text = node.Glyph;
+            NodeGlyphPreview.Glyph = node.Glyph;
+            NodeActionTypeBox.SelectedItem = node.ActionType;
+            NodeActionDataBox.Text = node.ActionData;
+            _isEditing = false;
+        }
+        else
+        {
+            NodeLabelBox.Text = "";
+            NodeGlyphBox.Text = "";
+            NodeGlyphPreview.Glyph = "";
+            NodeActionTypeBox.SelectedIndex = -1;
+            NodeActionDataBox.Text = "";
+        }
+    }
+
+    private void NodeLabelBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_isEditing || NodeListBox.SelectedItem is not RingNode node) return;
+        node.Label = NodeLabelBox.Text;
+        var index = _configNodes.IndexOf(node);
+        if (index >= 0)
+        {
+            _configNodes.RemoveAt(index);
+            _configNodes.Insert(index, node);
+        }
+    }
+
+    private void NodeGlyphBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_isEditing || NodeListBox.SelectedItem is not RingNode node) return;
+        node.Glyph = NodeGlyphBox.Text;
+        NodeGlyphPreview.Glyph = node.Glyph;
+    }
+
+    private void NodeActionTypeBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isEditing || NodeListBox.SelectedItem is not RingNode node) return;
+        if (NodeActionTypeBox.SelectedItem is ActionType at)
+            node.ActionType = at;
+    }
+
+    private void NodeActionDataBox_TextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_isEditing || NodeListBox.SelectedItem is not RingNode node) return;
+        node.ActionData = NodeActionDataBox.Text;
+    }
+
     }
 
     public enum DeviceType { Usb, Bluetooth, Unknown }

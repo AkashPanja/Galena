@@ -29,19 +29,7 @@ public sealed partial class OsdWindow : Window
     private readonly List<Ellipse> _optionCircles = new();
     private readonly List<FontIcon> _optionIcons = new();
     private Storyboard? _currentStoryboard;
-    private const double Radius = 120;
-
-    private static readonly RadialOption[] Options =
-    {
-        new("\uE774", "Chrome"),
-        new("\uE8B9", "VLC"),
-        new("\uE995", "Vol+"),
-        new("\uE994", "Vol-"),
-        new("\uE74F", "Mute"),
-        new("\uE706", "Bright+"),
-        new("\uE708", "Bright-"),
-        new("\uE768", "Play"),
-    };
+    private double _radius = 120;
 
     private static readonly SolidColorBrush InactiveFill = new(Color.FromArgb(128, 255, 255, 255));
     private static readonly SolidColorBrush InactiveStroke = new(Color.FromArgb(255, 102, 102, 102));
@@ -96,17 +84,26 @@ public sealed partial class OsdWindow : Window
 
         SetWindowPos(hwnd, (IntPtr)(-1), 0, 0, 0, 0,
             SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
-
-        BuildOptions();
     }
 
-    private void BuildOptions()
+    public void LoadNodes(List<RingNode> nodes, int radius)
     {
-        for (int i = 0; i < Options.Length; i++)
+        _radius = radius;
+        OptionsContainer.Children.Clear();
+        _optionElements.Clear();
+        _optionCircles.Clear();
+        _optionIcons.Clear();
+
+        var count = nodes.Count;
+        if (count == 0) return;
+
+        double step = 360.0 / count;
+
+        for (int i = 0; i < count; i++)
         {
-            var angle = i * 45 * Math.PI / 180;
-            var targetX = Radius * Math.Sin(angle);
-            var targetY = -Radius * Math.Cos(angle);
+            var angle = i * step * Math.PI / 180;
+            var targetX = _radius * Math.Sin(angle);
+            var targetY = -_radius * Math.Cos(angle);
 
             var grid = new Grid
             {
@@ -134,7 +131,7 @@ public sealed partial class OsdWindow : Window
             var icon = new FontIcon
             {
                 FontFamily = new FontFamily("Segoe MDL2 Assets"),
-                Glyph = Options[i].Glyph,
+                Glyph = nodes[i].Glyph,
                 Foreground = InactiveForeground,
                 FontSize = 24,
             };
@@ -150,6 +147,8 @@ public sealed partial class OsdWindow : Window
 
     public void ShowMenu()
     {
+        if (_optionElements.Count == 0) return;
+
         _currentStoryboard?.Stop();
         var storyboard = new Storyboard();
         _currentStoryboard = storyboard;
@@ -196,12 +195,15 @@ public sealed partial class OsdWindow : Window
         Storyboard.SetTargetProperty(centerFade, "Opacity");
         storyboard.Children.Add(centerFade);
 
-        for (int i = 0; i < _optionElements.Count; i++)
+        int count = _optionElements.Count;
+        double step = 360.0 / count;
+
+        for (int i = 0; i < count; i++)
         {
             var opt = _optionElements[i];
-            var angle = i * 45 * Math.PI / 180;
-            var targetX = Radius * Math.Sin(angle);
-            var targetY = -Radius * Math.Cos(angle);
+            var angle = i * step * Math.PI / 180;
+            var targetX = _radius * Math.Sin(angle);
+            var targetY = -_radius * Math.Cos(angle);
             var delay = TimeSpan.FromMilliseconds(i * 30);
 
             var animX = new DoubleAnimation
@@ -374,9 +376,12 @@ public sealed partial class OsdWindow : Window
             CenterIcon.Foreground = InactiveForeground;
 
             var optIndex = index - 1;
-            _optionCircles[optIndex].Fill = ActiveFill;
-            _optionCircles[optIndex].Stroke = ActiveStroke;
-            _optionIcons[optIndex].Foreground = ActiveForeground;
+            if (optIndex < _optionCircles.Count)
+            {
+                _optionCircles[optIndex].Fill = ActiveFill;
+                _optionCircles[optIndex].Stroke = ActiveStroke;
+                _optionIcons[optIndex].Foreground = ActiveForeground;
+            }
         }
     }
 

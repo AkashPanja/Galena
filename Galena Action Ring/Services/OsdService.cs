@@ -13,6 +13,8 @@ public class OsdService
     private int _selectedIndex;
     private bool _isVisible;
 
+    public RingProfile CurrentProfile { get; internal set; } = new();
+
     public int SelectedIndex => _selectedIndex;
     public bool IsVisible => _isVisible;
 
@@ -20,7 +22,12 @@ public class OsdService
 
     public void Initialize()
     {
+        CurrentProfile = ProfileService.LoadProfile("Default") ?? ProfileService.CreateDefault();
+        if (ProfileService.LoadProfile("Default") == null)
+            ProfileService.SaveProfile(CurrentProfile);
+
         _osdWindow = new OsdWindow();
+        _osdWindow.LoadNodes(CurrentProfile.Nodes, CurrentProfile.Radius);
         NativeMethods.SetWindowSize(_osdWindow);
         NativeMethods.SetWindowPosition(_osdWindow);
         _osdWindow.Activate();
@@ -28,6 +35,13 @@ public class OsdService
 
         _timeoutTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(5) };
         _timeoutTimer.Tick += (_, _) => Hide();
+    }
+
+    public void ReloadProfile()
+    {
+        if (_osdWindow == null) return;
+        CurrentProfile = ProfileService.LoadProfile("Default") ?? ProfileService.CreateDefault();
+        _osdWindow.LoadNodes(CurrentProfile.Nodes, CurrentProfile.Radius);
     }
 
     public void Show()
@@ -55,7 +69,8 @@ public class OsdService
     public void SelectNext()
     {
         if (!_isVisible) return;
-        _selectedIndex = (_selectedIndex + 1) % 9;
+        var maxIndex = CurrentProfile.NodeCount;
+        _selectedIndex = (_selectedIndex + 1) % (maxIndex + 1);
         _osdWindow?.SelectOption(_selectedIndex);
         ResetTimeout();
     }
@@ -63,7 +78,8 @@ public class OsdService
     public void SelectPrev()
     {
         if (!_isVisible) return;
-        _selectedIndex = (_selectedIndex + 8) % 9;
+        var maxIndex = CurrentProfile.NodeCount;
+        _selectedIndex = (_selectedIndex + maxIndex) % (maxIndex + 1);
         _osdWindow?.SelectOption(_selectedIndex);
         ResetTimeout();
     }
