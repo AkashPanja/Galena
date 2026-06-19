@@ -6,6 +6,7 @@ namespace Galena_Action_Ring;
 public class RingProfile
 {
     public string Name { get; set; } = "Default";
+    public string? ProcessName { get; set; }
     public int Radius { get; set; } = 120;
     public List<RingNode> Nodes { get; set; } = new();
 

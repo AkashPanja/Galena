@@ -21,6 +21,10 @@
             <SolidColorBrush x:Key="NavigationViewContentBackground" Color="Transparent" />
             <SolidColorBrush x:Key="NavigationViewContentBorderBrush" Color="Transparent" />
             <SolidColorBrush x:Key="NavigationViewContentGridBorderBrush" Color="Transparent" />
+
+            <SolidColorBrush x:Key="NodeFillBrush" Color="#FF1A1A1A" />
+            <SolidColorBrush x:Key="NodeActiveStrokeBrush" Color="#FF0078D4" />
+            <SolidColorBrush x:Key="CanvasBackgroundBrush" Color="#FFF5F5F5" />
         </ResourceDictionary>
     </Application.Resources>
 </Application>

@@ -1,5 +1,7 @@
+using Microsoft.UI;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Shapes;
 using System;
@@ -26,45 +28,58 @@ namespace Galena_Action_Ring
         private bool _isConnected;
         private bool _manualDisconnect;
 
-        private readonly ObservableCollection<SlotItem> _slotItems = new();
-        private bool _isEditing;
-        private int _selectedSlotIndex = -1;
-        private static readonly Color _white = Color.FromArgb(180, 255, 255, 255);
-        private static readonly Color _black = Color.FromArgb(255, 0, 0, 0);
-
         public ObservableCollection<DeviceItem> DeviceItems { get; } = new();
+
+        // Canvas editor state
+        private List<RingNode> _canvasNodes = new();
+        private readonly List<Grid> _canvasElements = new();
+        private int _selectedCanvasIndex = -1;
+        private bool _isDragging;
+        private int _dragIndex = -1;
+        private double _dragStartAngle;
+
+        // Sub-menu navigation
+        private readonly Stack<(List<RingNode> Nodes, string Title, List<RingNode> ParentNodes)> _canvasStack = new();
+        private List<RingNode> _activeNodes = new();
+
+        // App profiles
+        private readonly List<RingProfile> _appProfiles = new();
+        private int _selectedProfileIndex;
+
+        // Canvas sizing
+        private const double ActualOsdSize = 400;
+        private const double CanvasViewport = 400;
+        private double Scale => CanvasViewport / ActualOsdSize;
+
+        // Brushes
+        private static readonly SolidColorBrush NodeFill = new(Color.FromArgb(255, 26, 26, 26));
+        private static readonly SolidColorBrush NodeForeground = new(Colors.White);
+        private static readonly SolidColorBrush NodeActiveStroke = new(Color.FromArgb(255, 0, 120, 212));
+        private static readonly SolidColorBrush NodeLabelBrush = new(Colors.Black);
+        private static readonly SolidColorBrush CenterBrush = new(Color.FromArgb(255, 200, 200, 200));
 
         public MainWindow()
         {
             InitializeComponent();
             DeviceListControl.ItemsSource = DeviceItems;
+
             ExtendsContentIntoTitleBar = true;
             SetTitleBar(AppTitleBar);
             NavView.SelectedItem = NavBluetooth;
 
-            _trayService.ShowRequested += () =>
-            {
-                NativeMethods.ShowTopmost(this);
-            };
-            _trayService.HideRequested += () =>
-            {
-                NativeMethods.HideWindow(this);
-            };
-            _trayService.CloseRequested += async () =>
-            {
-                await ShowCloseDialog();
-            };
+            _trayService.ShowRequested += () => NativeMethods.ShowTopmost(this);
+            _trayService.HideRequested += () => NativeMethods.HideWindow(this);
+            _trayService.CloseRequested += async () => await ShowCloseDialog();
             _trayService.ExitRequested += () =>
             {
                 _trayService.Dispose();
                 Application.Current.Exit();
             };
-
             _trayService.Setup(this);
 
-            SlotActionTypeBox.ItemsSource = Enum.GetValues<ActionType>();
-            SlotListBox.ItemsSource = _slotItems;
-            InitSlots();
+            InitAppProfiles();
+            BuildActionCategories();
+            LoadCurrentProfile();
 
             _ = RefreshDeviceListAsync();
             StartPollTimer();
@@ -410,111 +425,517 @@ namespace Galena_Action_Ring
             DevicesTitle.Text = tag == "Bluetooth" ? "Devices" : "";
         }
 
-        private void InitSlots()
+        #region Canvas Editor
+
+        private void InitAppProfiles()
         {
-            var profile = OsdService.Instance.CurrentProfile;
-            _slotItems.Clear();
-            for (int i = 0; i < 8; i++)
+            _appProfiles.Clear();
+            var existing = ProfileService.ListProfiles();
+            foreach (var name in existing)
             {
-                var node = i < profile.Nodes.Count ? profile.Nodes[i] : new RingNode();
-                _slotItems.Add(new SlotItem(i, node));
+                var p = ProfileService.LoadProfile(name) ?? new RingProfile { Name = name };
+                _appProfiles.Add(p);
             }
-            ProfileNameBox.Text = profile.Name;
-            _selectedSlotIndex = -1;
-            SlotListBox.SelectedItem = null;
-            UpdatePreview();
+            if (_appProfiles.Count == 0)
+            {
+                var def = ProfileService.CreateDefault();
+                ProfileService.SaveProfile(def);
+                _appProfiles.Add(def);
+            }
+            _selectedProfileIndex = 0;
+            RefreshAppProfileTabs();
         }
 
-        private void SaveProfile_Click(object sender, RoutedEventArgs e)
+        private void RefreshAppProfileTabs()
         {
-            var profile = OsdService.Instance.CurrentProfile;
-            profile.Name = ProfileNameBox.Text;
-            profile.Nodes = _slotItems.Select(s => s.Node).ToList();
+            AppProfileTabs.Items.Clear();
+            for (int i = 0; i < _appProfiles.Count; i++)
+            {
+                var p = _appProfiles[i];
+                var tab = new ProfileTabItem
+                {
+                    Profile = p,
+                    DisplayName = p.ProcessName ?? p.Name,
+                    Icon = p.ProcessName != null ? "\uE774" : "\uE713",
+                    IconBrush = new SolidColorBrush(p.ProcessName != null
+                        ? Color.FromArgb(255, 0, 120, 212)
+                        : Color.FromArgb(255, 100, 100, 100)),
+                };
+                AppProfileTabs.Items.Add(tab);
+            }
+            if (_selectedProfileIndex >= 0 && _selectedProfileIndex < AppProfileTabs.Items.Count)
+                AppProfileTabs.SelectedIndex = _selectedProfileIndex;
+        }
+
+        private void AppProfileTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (AppProfileTabs.SelectedIndex < 0) return;
+            _selectedProfileIndex = AppProfileTabs.SelectedIndex;
+            LoadCurrentProfile();
+        }
+
+        private void AppProfileTabs_ItemClick(object sender, ItemClickEventArgs e)
+        {
+            if (e.ClickedItem is ProfileTabItem tab)
+            {
+                var idx = _appProfiles.IndexOf(tab.Profile);
+                if (idx >= 0)
+                {
+                    _selectedProfileIndex = idx;
+                    LoadCurrentProfile();
+                }
+            }
+        }
+
+        private void AddAppProfileBtn_Click(object sender, RoutedEventArgs e)
+        {
+            var newProfile = new RingProfile
+            {
+                Name = $"Profile {_appProfiles.Count + 1}",
+                Radius = 120,
+                Nodes = ProfileService.CreateDefault().Nodes
+            };
+            ProfileService.SaveProfile(newProfile);
+            _appProfiles.Add(newProfile);
+            _selectedProfileIndex = _appProfiles.Count - 1;
+            RefreshAppProfileTabs();
+            LoadCurrentProfile();
+        }
+
+        private void LoadCurrentProfile()
+        {
+            if (_selectedProfileIndex < 0 || _selectedProfileIndex >= _appProfiles.Count) return;
+            var profile = _appProfiles[_selectedProfileIndex];
+            OsdService.Instance.CurrentProfile = profile;
+            _canvasStack.Clear();
+            _activeNodes = profile.Nodes;
+            _canvasNodes = _activeNodes;
+            CanvasTitle.Text = profile.Name;
+            CanvasBackBtn.Visibility = Visibility.Collapsed;
+            _selectedCanvasIndex = -1;
+            RenderCanvas();
+        }
+
+        private void SaveCurrentProfile()
+        {
+            if (_selectedProfileIndex < 0 || _selectedProfileIndex >= _appProfiles.Count) return;
+            var profile = _appProfiles[_selectedProfileIndex];
+            profile.Nodes = _activeNodes.ToList();
             ProfileService.SaveProfile(profile);
             OsdService.Instance.ReloadProfile(profile.Name);
         }
 
-        private void LoadProfile_Click(object sender, RoutedEventArgs e)
-        {
-            var profiles = ProfileService.ListProfiles();
-            var target = profiles.Length > 0 ? profiles[0] : "Default";
+        private void SaveProfileBtn_Click(object sender, RoutedEventArgs e) => SaveCurrentProfile();
 
-            var profile = ProfileService.LoadProfile(target) ?? ProfileService.CreateDefault();
-            OsdService.Instance.CurrentProfile = profile;
-            InitSlots();
-            OsdService.Instance.ReloadProfile(profile.Name);
+        // --- Canvas Rendering ---
+        private void RenderCanvas()
+        {
+            RingCanvas.Children.Clear();
+            _canvasElements.Clear();
+            var count = _canvasNodes.Count;
+            if (count == 0) return;
+
+            var radius = 120.0 * Scale;
+            var circleSize = 56.0 * Scale;
+            var fontSize = 24.0 * Scale;
+            var labelFontSize = 13.0;
+            var cx = CanvasViewport / 2;
+            var cy = CanvasViewport / 2;
+            var step = 360.0 / count;
+
+            for (int i = 0; i < count; i++)
+            {
+                var angle = i * step * Math.PI / 180;
+                var x = cx + radius * Math.Sin(angle);
+                var y = cy - radius * Math.Cos(angle);
+
+                var grid = new Grid { Width = circleSize, Height = circleSize };
+                Canvas.SetLeft(grid, x - circleSize / 2);
+                Canvas.SetTop(grid, y - circleSize / 2);
+
+                var ellipse = new Ellipse { Width = circleSize, Height = circleSize, Fill = NodeFill };
+                if (i == _selectedCanvasIndex)
+                {
+                    ellipse.Stroke = NodeActiveStroke;
+                    ellipse.StrokeThickness = 3;
+                }
+                grid.Children.Add(ellipse);
+
+                var icon = new FontIcon
+                {
+                    FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                    Glyph = _canvasNodes[i].Glyph,
+                    FontSize = fontSize,
+                    Foreground = NodeForeground,
+                };
+                grid.Children.Add(icon);
+                RingCanvas.Children.Add(grid);
+                _canvasElements.Add(grid);
+
+                var label = new TextBlock
+                {
+                    Text = _canvasNodes[i].Label,
+                    FontSize = labelFontSize,
+                    Foreground = NodeLabelBrush,
+                    TextAlignment = TextAlignment.Center,
+                    MaxWidth = 100,
+                    TextWrapping = TextWrapping.NoWrap,
+                    TextTrimming = TextTrimming.CharacterEllipsis,
+                };
+                var labelDist = circleSize / 2 + 10;
+                var lx = cx + (radius + labelDist) * Math.Sin(angle);
+                var ly = cy - (radius + labelDist) * Math.Cos(angle);
+                Canvas.SetLeft(label, lx - 50);
+                Canvas.SetTop(label, ly - 8);
+                RingCanvas.Children.Add(label);
+            }
+
+            var ccs = 24.0 * Scale;
+            var cg = new Grid { Width = ccs, Height = ccs };
+            Canvas.SetLeft(cg, cx - ccs / 2);
+            Canvas.SetTop(cg, cy - ccs / 2);
+            cg.Children.Add(new Ellipse { Width = ccs, Height = ccs, Fill = CenterBrush });
+            cg.Children.Add(new FontIcon
+            {
+                FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                Glyph = _canvasStack.Count > 0 ? "\uE72B" : "\uE711",
+                FontSize = 10,
+                Foreground = new SolidColorBrush(Colors.Black),
+            });
+            RingCanvas.Children.Add(cg);
         }
 
-        private void SlotList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        private int HitTestNode(Windows.Foundation.Point position)
         {
-            if (e.AddedItems.FirstOrDefault() is SlotItem slot)
+            for (int i = 0; i < _canvasElements.Count; i++)
             {
-                _selectedSlotIndex = slot.Index;
-                _isEditing = true;
-                SlotLabelBox.Text = slot.Node.Label;
-                SlotGlyphBox.Text = slot.Node.Glyph;
-                SlotGlyphPreview.Glyph = slot.Node.Glyph;
-                SlotActionTypeBox.SelectedItem = slot.Node.ActionType;
-                UpdateActionDataPlaceholder(slot.Node.ActionType);
-                SlotActionDataBox.Text = slot.Node.ActionData;
-                _isEditing = false;
+                var el = _canvasElements[i];
+                var left = Canvas.GetLeft(el);
+                var top = Canvas.GetTop(el);
+                if (position.X >= left && position.X <= left + el.Width &&
+                    position.Y >= top && position.Y <= top + el.Height)
+                    return i;
+            }
+            return -1;
+        }
+
+        // --- Pointer Handlers ---
+        private void RingCanvas_PointerPressed(object sender, PointerRoutedEventArgs e)
+        {
+            var pos = e.GetCurrentPoint(RingCanvas).Position;
+            var hitIndex = HitTestNode(pos);
+
+            if (hitIndex >= 0)
+            {
+                _selectedCanvasIndex = hitIndex;
+                _isDragging = true;
+                _dragIndex = hitIndex;
+                var cx = CanvasViewport / 2;
+                var cy = CanvasViewport / 2;
+                _dragStartAngle = Math.Atan2(pos.X - cx, cy - pos.Y);
+                RenderCanvas();
+                ShowNodeProperties(_canvasNodes[hitIndex]);
             }
             else
             {
-                _selectedSlotIndex = -1;
-                ClearEditor();
+                _selectedCanvasIndex = -1;
+                HideNodeProperties();
+                RenderCanvas();
             }
+            RingCanvas.CapturePointer(e.Pointer);
         }
 
-        private void SlotLabelBox_TextChanged(object sender, TextChangedEventArgs e)
+        private void RingCanvas_PointerMoved(object sender, PointerRoutedEventArgs e)
         {
-            if (_isEditing || _selectedSlotIndex < 0) return;
-            _slotItems[_selectedSlotIndex].Node.Label = SlotLabelBox.Text;
-        }
+            if (!_isDragging || _dragIndex < 0 || _canvasNodes.Count < 2) return;
+            var pos = e.GetCurrentPoint(RingCanvas).Position;
+            var cx = CanvasViewport / 2;
+            var cy = CanvasViewport / 2;
+            var currentAngle = Math.Atan2(pos.X - cx, cy - pos.Y);
 
-        private void SlotGlyphBox_TextChanged(object sender, TextChangedEventArgs e)
-        {
-            if (_isEditing || _selectedSlotIndex < 0) return;
-            _slotItems[_selectedSlotIndex].Node.Glyph = SlotGlyphBox.Text;
-            SlotGlyphPreview.Glyph = SlotGlyphBox.Text;
-            UpdatePreview();
-        }
+            var count = _canvasNodes.Count;
+            var step = 360.0 / count;
+            var angleDeg = ((currentAngle * 180 / Math.PI) + 360) % 360;
+            var nearestIndex = (int)Math.Round(angleDeg / step) % count;
 
-        private void SlotActionTypeBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
-        {
-            if (_isEditing || _selectedSlotIndex < 0) return;
-            if (SlotActionTypeBox.SelectedItem is ActionType at)
+            if (nearestIndex != _dragIndex)
             {
-                _slotItems[_selectedSlotIndex].Node.ActionType = at;
-                UpdateActionDataPlaceholder(at);
+                var temp = _canvasNodes[_dragIndex];
+                _canvasNodes.RemoveAt(_dragIndex);
+                _canvasNodes.Insert(nearestIndex, temp);
+                _dragIndex = nearestIndex;
+                _selectedCanvasIndex = nearestIndex;
+                RenderCanvas();
+                ShowNodeProperties(_canvasNodes[nearestIndex]);
             }
         }
 
-        private void SlotActionDataBox_TextChanged(object sender, TextChangedEventArgs e)
+        private void RingCanvas_PointerReleased(object sender, PointerRoutedEventArgs e)
         {
-            if (_isEditing || _selectedSlotIndex < 0) return;
-            _slotItems[_selectedSlotIndex].Node.ActionData = SlotActionDataBox.Text;
+            _isDragging = false;
+            _dragIndex = -1;
+            RingCanvas.ReleasePointerCapture(e.Pointer);
         }
 
-        private void ClearEditor()
+        private void RingCanvas_PointerCanceled(object sender, PointerRoutedEventArgs e)
         {
-            SlotLabelBox.Text = "";
-            SlotGlyphBox.Text = "";
-            SlotGlyphPreview.Glyph = "";
-            SlotActionTypeBox.SelectedIndex = -1;
-            SlotActionDataBox.Text = "";
+            _isDragging = false;
+            _dragIndex = -1;
         }
 
-        private void UpdateActionDataPlaceholder(ActionType at)
+        // --- Node Properties ---
+        private void ShowNodeProperties(RingNode node)
         {
-            SlotActionDataBox.PlaceholderText = at switch
+            NodePropertiesCard.Visibility = Visibility.Visible;
+            PropGlyphPreview.Glyph = node.Glyph;
+            PropLabelDisplay.Text = node.Label;
+            PropActionDisplay.Text = node.ActionType.ToString();
+            PropLabelBox.Text = node.Label;
+            PropActionDataBox.Text = node.ActionData;
+            PropActionDataBox.PlaceholderText = node.ActionType switch
             {
                 ActionType.LaunchApp => "Path to .exe or shortcut",
                 ActionType.OpenUrl => "https://...",
                 ActionType.TextExpansion => "Text snippet to paste",
                 _ => ""
             };
+            EditSubmenuBtn.Visibility = node.ActionType == ActionType.Folder
+                ? Visibility.Visible : Visibility.Collapsed;
         }
+
+        private void HideNodeProperties()
+        {
+            NodePropertiesCard.Visibility = Visibility.Collapsed;
+        }
+
+        private void PropLabelBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_selectedCanvasIndex < 0 || _selectedCanvasIndex >= _canvasNodes.Count) return;
+            _canvasNodes[_selectedCanvasIndex].Label = PropLabelBox.Text;
+            PropLabelDisplay.Text = PropLabelBox.Text;
+            RenderCanvas();
+        }
+
+        private void PropActionDataBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            if (_selectedCanvasIndex < 0 || _selectedCanvasIndex >= _canvasNodes.Count) return;
+            _canvasNodes[_selectedCanvasIndex].ActionData = PropActionDataBox.Text;
+        }
+
+        // --- Add/Remove Nodes ---
+        private void AddNodeBtn_Click(object sender, RoutedEventArgs e)
+        {
+            var newNode = new RingNode { Glyph = "\uE710", Label = "New", ActionType = ActionType.None };
+            _activeNodes.Add(newNode);
+            _selectedCanvasIndex = _activeNodes.Count - 1;
+            RenderCanvas();
+            ShowNodeProperties(newNode);
+        }
+
+        private void RemoveNodeBtn_Click(object sender, RoutedEventArgs e)
+        {
+            if (_selectedCanvasIndex < 0 || _canvasNodes.Count <= 2) return;
+            _activeNodes.RemoveAt(_selectedCanvasIndex);
+            _selectedCanvasIndex = -1;
+            HideNodeProperties();
+            RenderCanvas();
+        }
+
+        // --- Sub-menu Navigation ---
+        private void EditSubmenuBtn_Click(object sender, RoutedEventArgs e)
+        {
+            if (_selectedCanvasIndex < 0 || _selectedCanvasIndex >= _canvasNodes.Count) return;
+            var node = _canvasNodes[_selectedCanvasIndex];
+            if (node.ActionType != ActionType.Folder) return;
+            if (node.Children == null) node.Children = new List<RingNode>();
+
+            _canvasStack.Push((_canvasNodes, CanvasTitle.Text, _activeNodes));
+            _activeNodes = node.Children;
+            _canvasNodes = _activeNodes;
+            CanvasTitle.Text = node.Label;
+            CanvasBackBtn.Visibility = Visibility.Visible;
+            _selectedCanvasIndex = -1;
+            HideNodeProperties();
+            RenderCanvas();
+        }
+
+        private void CanvasBackBtn_Click(object sender, RoutedEventArgs e)
+        {
+            if (_canvasStack.Count == 0) return;
+            var (nodes, title, parentNodes) = _canvasStack.Pop();
+            _activeNodes = parentNodes;
+            _canvasNodes = _activeNodes;
+            CanvasTitle.Text = title;
+            CanvasBackBtn.Visibility = _canvasStack.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
+            _selectedCanvasIndex = -1;
+            HideNodeProperties();
+            RenderCanvas();
+        }
+
+        // --- Action Categories ---
+        private void BuildActionCategories()
+        {
+            ActionCategories.Children.Clear();
+
+            var categories = new (string Title, string Icon, (string Glyph, string Label, ActionType Type)[] Actions)[]
+            {
+                ("MEDIA & VOLUME", "\uE767", new[]
+                {
+                    ("\uE995", "Volume Up", ActionType.VolumeUp),
+                    ("\uE994", "Volume Down", ActionType.VolumeDown),
+                    ("\uE74F", "Mute", ActionType.MuteToggle),
+                    ("\uE768", "Play/Pause", ActionType.MediaPlayPause),
+                    ("\uE7E8", "Next Track", ActionType.MediaNext),
+                    ("\uE7E9", "Previous Track", ActionType.MediaPrevious),
+                }),
+                ("OPEN", "\uE774", new[]
+                {
+                    ("\uE774", "Launch App", ActionType.LaunchApp),
+                    ("\uE770", "Open URL", ActionType.OpenUrl),
+                }),
+                ("NAVIGATION", "\uE72B", Array.Empty<(string, string, ActionType)>()),
+                ("UTILITIES", "\uE713", new[]
+                {
+                    ("\uE70F", "Text Expansion", ActionType.TextExpansion),
+                    ("\uE711", "Close OSD", ActionType.CloseOsd),
+                }),
+                ("SYSTEM", "\uE770", new[]
+                {
+                    ("\uE706", "Brightness Up", ActionType.BrightnessUp),
+                    ("\uE708", "Brightness Down", ActionType.BrightnessDown),
+                }),
+                ("ADVANCED", "\uE8B7", new[]
+                {
+                    ("\uE8B7", "Folder (Sub-menu)", ActionType.Folder),
+                }),
+            };
+
+            foreach (var (title, icon, actions) in categories)
+            {
+                var expander = new Expander
+                {
+                    Header = title,
+                    FontSize = 12,
+                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                    Margin = new Thickness(0),
+                };
+
+                if (actions.Length > 0)
+                {
+                    var panel = new StackPanel { Spacing = 0 };
+                    foreach (var (glyph, label, actionType) in actions)
+                    {
+                        var btn = new Button
+                        {
+                            HorizontalAlignment = HorizontalAlignment.Stretch,
+                            HorizontalContentAlignment = HorizontalAlignment.Left,
+                            Background = new SolidColorBrush(Colors.Transparent),
+                            BorderThickness = new Thickness(0),
+                            Padding = new Thickness(16, 8, 16, 8),
+                            Tag = (glyph, actionType),
+                        };
+
+                        var row = new Grid { Width = 280 };
+                        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
+                        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
+                        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+                        row.Children.Add(new FontIcon
+                        {
+                            FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                            Glyph = glyph,
+                            FontSize = 16,
+                            VerticalAlignment = VerticalAlignment.Center,
+                        });
+                        var lbl = new TextBlock
+                        {
+                            Text = label,
+                            FontSize = 13,
+                            VerticalAlignment = VerticalAlignment.Center,
+                            Margin = new Thickness(12, 0, 0, 0),
+                        };
+                        Grid.SetColumn(lbl, 2);
+                        row.Children.Add(lbl);
+                        btn.Content = row;
+
+                        var capturedGlyph = glyph;
+                        var capturedType = actionType;
+                        var capturedLabel = label;
+                        btn.Click += (_, _) => AddActionToRing(capturedGlyph, capturedType, capturedLabel);
+                        panel.Children.Add(btn);
+                    }
+                    expander.Content = panel;
+                }
+                else
+                {
+                    expander.Content = new TextBlock
+                    {
+                        Text = "Coming soon",
+                        FontSize = 12,
+                        Foreground = new SolidColorBrush(Color.FromArgb(255, 150, 150, 150)),
+                        Margin = new Thickness(16, 8, 16, 8),
+                    };
+                }
+
+                ActionCategories.Children.Add(expander);
+            }
+
+            ActionSearchBox.TextChanged += ActionSearchBox_TextChanged;
+        }
+
+        private void AddActionToRing(string glyph, ActionType type, string label)
+        {
+            var newNode = new RingNode
+            {
+                Glyph = glyph,
+                Label = label,
+                ActionType = type,
+                ActionData = type switch
+                {
+                    ActionType.LaunchApp => "",
+                    ActionType.OpenUrl => "",
+                    ActionType.Folder => "",
+                    _ => ""
+                },
+            };
+            if (type == ActionType.Folder)
+                newNode.Children = new List<RingNode>();
+
+            _activeNodes.Add(newNode);
+            _selectedCanvasIndex = _activeNodes.Count - 1;
+            RenderCanvas();
+            ShowNodeProperties(newNode);
+        }
+
+        private void ActionSearchBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            var query = ActionSearchBox.Text?.Trim().ToLowerInvariant() ?? "";
+            foreach (var child in ActionCategories.Children)
+            {
+                if (child is Expander exp && exp.Content is StackPanel panel)
+                {
+                    var hasMatch = string.IsNullOrEmpty(query);
+                    foreach (var btn in panel.Children.OfType<Button>())
+                    {
+                        if (btn.Content is Grid grid && grid.Children.Count >= 3)
+                        {
+                            var lbl = grid.Children.OfType<TextBlock>().FirstOrDefault();
+                            if (lbl != null)
+                            {
+                                var match = string.IsNullOrEmpty(query) ||
+                                            lbl.Text.ToLowerInvariant().Contains(query);
+                                btn.Visibility = match ? Visibility.Visible : Visibility.Collapsed;
+                                if (match && !string.IsNullOrEmpty(query)) hasMatch = true;
+                            }
+                        }
+                    }
+                    exp.Visibility = hasMatch ? Visibility.Visible : Visibility.Collapsed;
+                    if (!string.IsNullOrEmpty(query) && hasMatch) exp.IsExpanded = true;
+                }
+            }
+        }
+
+        #endregion
 
         #region Icon Picker
 
@@ -536,15 +957,18 @@ namespace Galena_Action_Ring
         private void IconPickerBtn_Click(object sender, RoutedEventArgs e)
         {
             var flyout = new Flyout();
+            var root = new StackPanel { Spacing = 8, Width = 310 };
+
+            var searchBox = new TextBox { PlaceholderText = "Search icons...", Margin = new Thickness(0) };
             var grid = new Grid();
             var columns = 6;
             var rows = (int)Math.Ceiling((double)CommonIcons.Length / columns);
-
             for (int i = 0; i < rows; i++)
                 grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) });
             for (int i = 0; i < columns; i++)
                 grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
 
+            var allBtns = new List<(Button Btn, string Label)>();
             for (int i = 0; i < CommonIcons.Length; i++)
             {
                 var btn = new Button
@@ -556,99 +980,50 @@ namespace Galena_Action_Ring
                         Glyph = CommonIcons[i].Glyph,
                         FontSize = 18,
                     },
-                    Tag = CommonIcons[i].Glyph,
                     Margin = new Thickness(2),
                 };
                 var glyph = CommonIcons[i].Glyph;
-                btn.Click += (s, args) =>
+                btn.Click += (_, _) =>
                 {
-                    if (_selectedSlotIndex >= 0)
+                    if (_selectedCanvasIndex >= 0 && _selectedCanvasIndex < _canvasNodes.Count)
                     {
-                        _slotItems[_selectedSlotIndex].Node.Glyph = glyph;
-                        SlotGlyphBox.Text = glyph;
-                        SlotGlyphPreview.Glyph = glyph;
-                        UpdatePreview();
+                        _canvasNodes[_selectedCanvasIndex].Glyph = glyph;
+                        PropGlyphPreview.Glyph = glyph;
+                        RenderCanvas();
                     }
                     flyout.Hide();
                 };
                 Grid.SetRow(btn, i / columns);
                 Grid.SetColumn(btn, i % columns);
                 grid.Children.Add(btn);
+                allBtns.Add((btn, CommonIcons[i].Label.ToLowerInvariant()));
             }
 
-            var scroll = new ScrollViewer { Content = grid, Width = 310, Height = 250 };
-            flyout.Content = scroll;
+            searchBox.TextChanged += (_, _) =>
+            {
+                var q = searchBox.Text?.Trim().ToLowerInvariant() ?? "";
+                foreach (var (btn, label) in allBtns)
+                    btn.Visibility = string.IsNullOrEmpty(q) || label.Contains(q)
+                        ? Visibility.Visible : Visibility.Collapsed;
+            };
+
+            root.Children.Add(searchBox);
+            root.Children.Add(new ScrollViewer { Content = grid, Height = 250 });
+            flyout.Content = root;
             IconPickerBtn.Flyout = flyout;
             flyout.ShowAt(IconPickerBtn);
         }
 
         #endregion
 
-        #region Live Preview
-
-        private void UpdatePreview()
-        {
-            PreviewContainer.Children.Clear();
-            var radius = 60.0;
-            var count = 8;
-            var step = 360.0 / count;
-
-            for (int i = 0; i < count; i++)
-            {
-                var angle = i * step * Math.PI / 180;
-                var cx = 90.0 + radius * Math.Sin(angle) - 14;
-                var cy = 90.0 - radius * Math.Cos(angle) - 14;
-
-                var ellipse = new Ellipse
-                {
-                    Width = 28, Height = 28,
-                    Fill = new SolidColorBrush(_white),
-                };
-                Canvas.SetLeft(ellipse, cx);
-                Canvas.SetTop(ellipse, cy);
-                PreviewContainer.Children.Add(ellipse);
-
-                var glyph = i < _slotItems.Count ? _slotItems[i].Node.Glyph : "";
-                var icon = new FontIcon
-                {
-                    FontFamily = new FontFamily("Segoe MDL2 Assets"),
-                    Glyph = glyph,
-                    FontSize = 14,
-                    Foreground = new SolidColorBrush(_black),
-                };
-                Canvas.SetLeft(icon, cx + 7);
-                Canvas.SetTop(icon, cy + 7);
-                PreviewContainer.Children.Add(icon);
-            }
-        }
-
-        #endregion
-
     }
 
-    public class SlotItem : INotifyPropertyChanged
+    public class ProfileTabItem
     {
-        public int Index { get; }
-        public string SlotLabel => (Index + 1).ToString();
-        public RingNode Node { get; }
-
-        public SlotItem(int index, RingNode node)
-        {
-            Index = index;
-            Node = node;
-            Node.PropertyChanged += (_, _) =>
-            {
-                OnPropertyChanged(nameof(Glyph));
-                OnPropertyChanged(nameof(Label));
-            };
-        }
-
-        public string Glyph => Node.Glyph;
-        public string Label => Node.Label;
-
-        public event PropertyChangedEventHandler? PropertyChanged;
-        private void OnPropertyChanged([CallerMemberName] string? name = null) =>
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
+        public RingProfile Profile { get; set; } = new();
+        public string DisplayName { get; set; } = "";
+        public string Icon { get; set; } = "\uE713";
+        public SolidColorBrush IconBrush { get; set; } = new(Colors.Gray);
     }
 
     public enum DeviceType { Usb, Bluetooth, Unknown }
