@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "Galena Action Ring (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "Galena Action Ring (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

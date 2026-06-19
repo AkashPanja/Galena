@@ -1,0 +1,241 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Window
+    x:Class="Galena_Action_Ring.MainWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:local="using:Galena_Action_Ring">
+
+    <Window.SystemBackdrop>
+        <MicaBackdrop />
+    </Window.SystemBackdrop>
+
+    <Grid x:Name="AppRoot">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="48" />
+            <RowDefinition Height="*" />
+        </Grid.RowDefinitions>
+
+        <!-- App Title Bar -->
+        <Border x:Name="AppTitleBar" Grid.Row="0" Background="Transparent">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="*" />
+                </Grid.ColumnDefinitions>
+
+                <!-- Hamburger Button -->
+                <Button
+                    x:Name="HamburgerButton"
+                    Grid.Column="0"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Width="48" Height="48"
+                    Click="HamburgerButton_Click">
+                    <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE700;" FontSize="16" />
+                </Button>
+
+                <!-- Back Button -->
+                <Button
+                    x:Name="BackButton"
+                    Grid.Column="1"
+                    Background="Transparent"
+                    BorderThickness="0"
+                    Width="48" Height="48"
+                    IsEnabled="False">
+                    <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE72B;" FontSize="16" />
+                </Button>
+
+                <!-- Title -->
+                <TextBlock
+                    Grid.Column="2"
+                    Text="Galena Action Ring"
+                    FontSize="14"
+                    FontWeight="SemiBold"
+                    VerticalAlignment="Center"
+                    Margin="8,0,0,0" />
+
+
+
+                
+            </Grid>
+        </Border>
+
+        <!-- Main Navigation and Content -->
+        <NavigationView
+            x:Name="NavView"
+            Grid.Row="1"
+            PaneDisplayMode="Left"
+            IsSettingsVisible="False"
+            AlwaysShowHeader="False"
+            IsBackButtonVisible="Collapsed"
+            IsPaneToggleButtonVisible="False"
+            CompactModeThresholdWidth="720"
+            ExpandedModeThresholdWidth="0"
+            PaneTitle="Galena Action Ring"
+            ItemInvoked="NavView_ItemInvoked"
+            OpenPaneLength="280"
+            BorderThickness="0"
+            IsTabStop="False">
+
+            <NavigationView.MenuItems>
+                <NavigationViewItem x:Name="NavBluetooth" Tag="Bluetooth" Content="Devices">
+                    <NavigationViewItem.Icon>
+                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="&#xE975;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+
+            </NavigationView.MenuItems>
+
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <TextBlock x:Name="DevicesTitle" Text="Devices" FontSize="28" FontWeight="SemiBold" Margin="24,12,24,16" />
+
+                <ScrollViewer Grid.Row="1">
+                    <Grid x:Name="ContentArea" HorizontalAlignment="Stretch" Margin="24,0,24,0">
+
+                        <!-- ==================== DEVICES ==================== -->
+                        <Grid x:Name="BluetoothPage" Visibility="Visible">
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+
+                            <!-- Device Section Header -->
+                            <TextBlock Grid.Row="0" Text="Device" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8" />
+
+                            <!-- Device Info Card -->
+                            <Border Grid.Row="1" Style="{StaticResource SettingsCardStyle}" Padding="20">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0" Spacing="8">
+                                        <TextBlock x:Name="DeviceNameText" Text="Connected Action Ring Device" FontSize="18" FontWeight="SemiBold" />
+                                        <Grid>
+                                            <Grid.ColumnDefinitions>
+                                                <ColumnDefinition Width="Auto" />
+                                                <ColumnDefinition Width="*" />
+                                            </Grid.ColumnDefinitions>
+                                            <Ellipse x:Name="StatusDot" Width="12" Height="12" Fill="Gray" VerticalAlignment="Center" />
+                                            <TextBlock x:Name="StatusText" Grid.Column="1" Text="Disconnected" Margin="10,0,0,0" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </Grid>
+                                    </StackPanel>
+                                    <Button x:Name="ConnectButton" Grid.Column="1" Content="Connect" VerticalAlignment="Center" MinWidth="100" Click="ConnectButton_Click" />
+                                </Grid>
+                            </Border>
+
+                            <!-- Available Devices Section Header -->
+                            <TextBlock Grid.Row="2" Text="Available devices" FontSize="16" FontWeight="SemiBold" Margin="0,16,0,8" />
+
+                            <!-- Available Devices Card -->
+                            <Border Grid.Row="3" Style="{StaticResource SettingsCardStyle}">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <ItemsControl x:Name="DeviceListControl" Grid.Row="0">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Grid Margin="0,4">
+                                                    <Grid.ColumnDefinitions>
+                                                        <ColumnDefinition Width="*" />
+                                                        <ColumnDefinition Width="Auto" />
+                                                    </Grid.ColumnDefinitions>
+                                                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
+                                                        <FontIcon FontFamily="Segoe MDL2 Assets" Glyph="{Binding IconGlyph}" Foreground="{Binding IconBrush}" FontSize="16" VerticalAlignment="Center" />
+                                                        <StackPanel>
+                                                            <TextBlock Text="{Binding FriendlyName}" FontSize="14" />
+                                                            <TextBlock Text="{Binding PortName}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                        </StackPanel>
+                                                    </StackPanel>
+                                                    <Button Grid.Column="1" Content="{Binding ButtonText}" Tag="{Binding PortName}" Click="DeviceItemConnect_Click"
+                                                            Width="90" HorizontalAlignment="Stretch" />
+                                                </Grid>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                    <TextBlock x:Name="NoDevicesText" Grid.Row="1" Text="No devices found" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,16,0,0" Visibility="Collapsed" />
+                                </Grid>
+                            </Border>
+
+                            <!-- Debug Section Header -->
+                            <TextBlock Grid.Row="4" Text="Debug" FontSize="16" FontWeight="SemiBold" Margin="0,16,0,8" />
+
+                            <!-- Debug Toggle Card -->
+                            <Border x:Name="DebugToggleCard" Grid.Row="5" Style="{StaticResource SettingsCardStyle}">
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Debug" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                    <ToggleSwitch x:Name="DebugToggle" Grid.Column="1" Toggled="DebugToggle_Toggled" />
+                                </Grid>
+                            </Border>
+
+                            <!-- Debug Content Card (separate, collapsible) -->
+                            <Border x:Name="DebugContentCard" Grid.Row="6" Style="{StaticResource SettingsCardStyle}" Margin="0,0,0,24" Visibility="Collapsed">
+                                <Grid>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <!-- Prefix Row -->
+                                    <Grid Grid.Row="0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0">
+                                            <TextBlock Text="TX prefix" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <TextBox x:Name="TxPrefixBox" Text="→ " FontSize="12" />
+                                        </StackPanel>
+                                        <StackPanel Grid.Column="1" Margin="8,0,0,0">
+                                            <TextBlock Text="RX prefix" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                            <TextBox x:Name="RxPrefixBox" Text="← " FontSize="12" />
+                                        </StackPanel>
+                                    </Grid>
+
+                                    <!-- Log Area -->
+                                    <Border Grid.Row="1" Margin="0,8,0,0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" MinHeight="150" MaxHeight="400">
+                                        <ScrollViewer x:Name="LogScrollView">
+                                            <TextBlock x:Name="DebugLogText" FontFamily="Consolas" FontSize="12" TextWrapping="Wrap" Padding="8" IsTextSelectionEnabled="True" />
+                                        </ScrollViewer>
+                                    </Border>
+
+                                    <!-- Send Row -->
+                                    <Grid Grid.Row="2" Margin="0,8,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto" />
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <Button Grid.Column="0" Content="Clear" Click="ClearLogButton_Click" Margin="0,0,8,0" />
+                                        <TextBox x:Name="SendTextBox" Grid.Column="1" PlaceholderText="Data to send" />
+                                        <Button x:Name="SendButton" Grid.Column="2" Content="Send" Margin="8,0,0,0" Click="SendButton_Click" />
+                                    </Grid>
+                                </Grid>
+                            </Border>
+                        </Grid>
+
+
+                </Grid>
+            </ScrollViewer>
+            </Grid>
+        </NavigationView>
+    </Grid>
+</Window>

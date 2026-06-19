@@ -1,0 +1,10 @@
+<Window x:Class="OsdTest.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <Grid Background="#1e1e1e">
+        <Button x:Name="ShowOsdBtn" Content="Show OSD" Click="ShowOsdBtn_Click"
+                HorizontalAlignment="Center" VerticalAlignment="Center"
+                Width="200" Height="60" FontSize="20" />
+    </Grid>
+</Window>

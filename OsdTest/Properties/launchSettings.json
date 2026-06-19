@@ -1,0 +1,10 @@
+{
+  "profiles": {
+    "OsdTest (Package)": {
+      "commandName": "MsixPackage"
+    },
+    "OsdTest (Unpackaged)": {
+      "commandName": "Project"
+    }
+  }
+}

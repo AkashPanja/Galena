@@ -1,0 +1,22 @@
+using Microsoft.UI.Xaml;
+
+namespace OsdTest;
+
+public sealed partial class MainWindow : Window
+{
+    private OsdWindow? _osdWindow;
+
+    public MainWindow()
+    {
+        InitializeComponent();
+    }
+
+    private void ShowOsdBtn_Click(object sender, RoutedEventArgs e)
+    {
+        if (_osdWindow == null)
+        {
+            _osdWindow = new OsdWindow();
+        }
+        _osdWindow.Activate();
+    }
+}
