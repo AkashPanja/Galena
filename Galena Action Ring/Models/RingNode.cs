@@ -18,9 +18,21 @@ public enum ActionType
     MediaPlayPause,
     MediaNext,
     MediaPrevious,
+    MediaSeekForward,
+    MediaSeekBackward,
     TextExpansion,
     Folder,
-    CloseOsd
+    CloseOsd,
+    ToggleNightLight,
+    VolumeControl,
+    BrightnessControl
+}
+
+public enum ActionCategory
+{
+    Individual,
+    Group,
+    Folder
 }
 
 public class RingNode : INotifyPropertyChanged
@@ -29,6 +41,7 @@ public class RingNode : INotifyPropertyChanged
     private string _label = "Action";
     private ActionType _actionType = ActionType.None;
     private string _actionData = "";
+    private ActionCategory _category = ActionCategory.Individual;
 
     public string Glyph
     {
@@ -52,6 +65,12 @@ public class RingNode : INotifyPropertyChanged
     {
         get => _actionData;
         set { _actionData = value; OnPropertyChanged(); }
+    }
+
+    public ActionCategory Category
+    {
+        get => _category;
+        set { _category = value; OnPropertyChanged(); }
     }
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

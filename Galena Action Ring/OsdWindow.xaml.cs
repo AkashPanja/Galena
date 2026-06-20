@@ -31,12 +31,12 @@ public sealed partial class OsdWindow : Window
     private Storyboard? _currentStoryboard;
     private double _radius = 120;
 
-    private static readonly SolidColorBrush InactiveFill = new(Color.FromArgb(128, 255, 255, 255));
-    private static readonly SolidColorBrush InactiveStroke = new(Color.FromArgb(255, 102, 102, 102));
-    private static readonly SolidColorBrush InactiveForeground = new(Color.FromArgb(255, 0, 0, 0));
-    private static readonly SolidColorBrush ActiveFill = new(Color.FromArgb(255, 0, 0, 0));
-    private static readonly SolidColorBrush ActiveStroke = new(Color.FromArgb(255, 255, 255, 255));
-    private static readonly SolidColorBrush ActiveForeground = new(Color.FromArgb(255, 255, 255, 255));
+    private SolidColorBrush InactiveFill = new(Color.FromArgb(128, 255, 255, 255));
+    private SolidColorBrush InactiveStroke = new(Color.FromArgb(255, 102, 102, 102));
+    private SolidColorBrush InactiveForeground = new(Color.FromArgb(255, 0, 0, 0));
+    private SolidColorBrush ActiveFill = new(Color.FromArgb(255, 0, 0, 0));
+    private SolidColorBrush ActiveStroke = new(Color.FromArgb(255, 255, 255, 255));
+    private SolidColorBrush ActiveForeground = new(Color.FromArgb(255, 255, 255, 255));
 
     [DllImport("gdi32.dll")]
     private static extern IntPtr CreateEllipticRgn(int nLeftRect, int nTopRect, int nRightRect, int nBottomRect);
@@ -86,6 +86,151 @@ public sealed partial class OsdWindow : Window
             SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
     }
 
+    public void ApplyProfileColors(string primaryHex, string secondaryHex)
+    {
+        if (!string.IsNullOrEmpty(primaryHex) && TryParseColor(primaryHex, out var primary))
+        {
+            ActiveFill = new SolidColorBrush(primary);
+            ActiveForeground = Luminance(primary) > 128 ? new SolidColorBrush(Color.FromArgb(255, 0, 0, 0)) : new SolidColorBrush(Color.FromArgb(255, 255, 255, 255));
+            ActiveStroke = new SolidColorBrush(Color.FromArgb(255,
+                (byte)(255 - primary.R), (byte)(255 - primary.G), (byte)(255 - primary.B)));
+        }
+        if (!string.IsNullOrEmpty(secondaryHex) && TryParseColor(secondaryHex, out var secondary))
+        {
+            InactiveFill = new SolidColorBrush(secondary);
+            var bgLum = Luminance(secondary);
+            InactiveForeground = bgLum > 128 ? new SolidColorBrush(Color.FromArgb(255, 0, 0, 0)) : new SolidColorBrush(Color.FromArgb(255, 255, 255, 255));
+            InactiveStroke = new SolidColorBrush(Color.FromArgb(255, 102, 102, 102));
+        }
+    }
+
+    private static bool TryParseColor(string hex, out Color color)
+    {
+        color = Colors.Transparent;
+        try
+        {
+            if (hex.Length >= 7 && hex[0] == '#')
+            {
+                var a = hex.Length >= 9 ? System.Convert.ToByte(hex.Substring(1, 2), 16) : (byte)255;
+                var r = System.Convert.ToByte(hex.Substring(hex.Length - 6, 2), 16);
+                var g = System.Convert.ToByte(hex.Substring(hex.Length - 4, 2), 16);
+                var b = System.Convert.ToByte(hex.Substring(hex.Length - 2, 2), 16);
+                color = Color.FromArgb(a, r, g, b);
+                return true;
+            }
+        }
+        catch { }
+        return false;
+    }
+
+    private static byte Luminance(Color c)
+    {
+        return (byte)((c.R * 299 + c.G * 587 + c.B * 114) / 1000);
+    }
+
+    #region Radial Progress
+
+    public void ShowRadialProgress(string label, int percent)
+    {
+        RadialLabel.Text = label;
+        UpdateRadialPercent(percent);
+        RadialProgressLayer.Visibility = Visibility.Visible;
+        RadialProgressLayer.Opacity = 0;
+
+        OptionsContainer.Visibility = Visibility.Collapsed;
+        CenterButton.Visibility = Visibility.Collapsed;
+
+        var fadeIn = new DoubleAnimation
+        {
+            From = 0, To = 1,
+            Duration = new Duration(TimeSpan.FromMilliseconds(200)),
+        };
+        Storyboard.SetTarget(fadeIn, RadialProgressLayer);
+        Storyboard.SetTargetProperty(fadeIn, "Opacity");
+        var sb = new Storyboard();
+        sb.Children.Add(fadeIn);
+        sb.Begin();
+    }
+
+    public void UpdateRadialPercent(int percent)
+    {
+        percent = Math.Clamp(percent, 0, 100);
+        RadialPercent.Text = $"{percent}%";
+        var circ = 628.0; // π * 200
+        var offset = circ * (100 - percent) / 100.0;
+        RadialArc.StrokeDashOffset = -offset;
+        RadialArc.Stroke = percent > 0 ? ActiveFill : new SolidColorBrush(Colors.Gray);
+    }
+
+    public void HideRadialProgress()
+    {
+        var fadeOut = new DoubleAnimation
+        {
+            From = 1, To = 0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(150)),
+        };
+        Storyboard.SetTarget(fadeOut, RadialProgressLayer);
+        Storyboard.SetTargetProperty(fadeOut, "Opacity");
+        var sb = new Storyboard();
+        sb.Children.Add(fadeOut);
+        sb.Completed += (_, _) =>
+        {
+            RadialProgressLayer.Visibility = Visibility.Collapsed;
+            OptionsContainer.Visibility = Visibility.Visible;
+            CenterButton.Visibility = Visibility.Visible;
+        };
+        sb.Begin();
+    }
+
+    #endregion
+
+    #region Seek Mode
+
+    public void ShowSeekMode()
+    {
+        SeekLabel.Text = "Seek";
+        SeekIndicator.Text = "";
+        SeekLayer.Visibility = Visibility.Visible;
+        SeekLayer.Opacity = 0;
+
+        var fadeIn = new DoubleAnimation
+        {
+            From = 0, To = 1,
+            Duration = new Duration(TimeSpan.FromMilliseconds(200)),
+        };
+        Storyboard.SetTarget(fadeIn, SeekLayer);
+        Storyboard.SetTargetProperty(fadeIn, "Opacity");
+        var sb = new Storyboard();
+        sb.Children.Add(fadeIn);
+        sb.Begin();
+    }
+
+    public void UpdateSeekIndicator(string text)
+    {
+        SeekIndicator.Text = text;
+    }
+
+    public void HideSeekMode()
+    {
+        var fadeOut = new DoubleAnimation
+        {
+            From = 1, To = 0,
+            Duration = new Duration(TimeSpan.FromMilliseconds(150)),
+        };
+        Storyboard.SetTarget(fadeOut, SeekLayer);
+        Storyboard.SetTargetProperty(fadeOut, "Opacity");
+        var sb = new Storyboard();
+        sb.Children.Add(fadeOut);
+        sb.Completed += (_, _) =>
+        {
+            SeekLayer.Visibility = Visibility.Collapsed;
+            SeekIndicator.Text = "";
+        };
+        sb.Begin();
+    }
+
+    #endregion
+
     public void LoadNodes(List<RingNode> nodes, int radius)
     {
         _radius = radius;
@@ -130,7 +275,7 @@ public sealed partial class OsdWindow : Window
 
             var icon = new FontIcon
             {
-                FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                FontFamily = new FontFamily(MaterialIcons.FontFamilyName),
                 Glyph = nodes[i].Glyph,
                 Foreground = InactiveForeground,
                 FontSize = 24,

@@ -4,16 +4,52 @@
     xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
 
     <Grid Background="Transparent" Width="400" Height="400">
+        <!-- Main ring options -->
+        <Grid x:Name="OptionsContainer" HorizontalAlignment="Center" VerticalAlignment="Center" />
+
+        <!-- Center button -->
         <Grid x:Name="CenterButton" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0"
               RenderTransformOrigin="0.5,0.5">
             <Grid.RenderTransform>
                 <CompositeTransform x:Name="CenterButtonTransform" />
             </Grid.RenderTransform>
             <Ellipse x:Name="CenterEllipse" Width="36" Height="36" Fill="White" />
-            <FontIcon x:Name="CenterIcon" FontFamily="Segoe MDL2 Assets" Glyph="&#xE711;" Foreground="Black" FontSize="16"
+            <FontIcon x:Name="CenterIcon" FontFamily="Assets/MaterialSymbols.ttf#Material Symbols Outlined"
+                      Glyph="&#xE5CD;" Foreground="Black" FontSize="16"
                       HorizontalAlignment="Center" VerticalAlignment="Center" />
         </Grid>
 
-        <Grid x:Name="OptionsContainer" HorizontalAlignment="Center" VerticalAlignment="Center" />
+        <!-- Radial progress overlay (Volume/Brightness groups) -->
+        <Grid x:Name="RadialProgressLayer" Visibility="Collapsed"
+              HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0">
+            <Grid.RenderTransform>
+                <CompositeTransform x:Name="RadialTransform" />
+            </Grid.RenderTransform>
+            <Ellipse x:Name="RadialTrack" Width="200" Height="200" Stroke="#40FFFFFF" StrokeThickness="14" />
+            <Ellipse x:Name="RadialArc" Width="200" Height="200"
+                     Stroke="White" StrokeThickness="14" StrokeDashCap="Round"
+                     StrokeDashArray="628 628" StrokeDashOffset="0"
+                     RenderTransformOrigin="0.5,0.5">
+                <Ellipse.RenderTransform>
+                    <RotateTransform Angle="-90" />
+                </Ellipse.RenderTransform>
+            </Ellipse>
+            <TextBlock x:Name="RadialLabel" Text="" FontSize="14" Foreground="#AAFFFFFF"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-40,0,0" />
+            <TextBlock x:Name="RadialPercent" Text="0%" FontSize="44" FontWeight="Bold" Foreground="White"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Grid>
+
+        <!-- Seek mode overlay -->
+        <Grid x:Name="SeekLayer" Visibility="Collapsed"
+              HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0">
+            <Grid.RenderTransform>
+                <CompositeTransform x:Name="SeekTransform" />
+            </Grid.RenderTransform>
+            <TextBlock x:Name="SeekLabel" Text="Seek" FontSize="16" Foreground="#AAFFFFFF"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-40,0,0" />
+            <TextBlock x:Name="SeekIndicator" Text="" FontSize="56" FontWeight="Bold" Foreground="White"
+                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+        </Grid>
     </Grid>
 </Window>

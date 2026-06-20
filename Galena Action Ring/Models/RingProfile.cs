@@ -9,6 +9,8 @@ public class RingProfile
     public string? ProcessName { get; set; }
     public int Radius { get; set; } = 120;
     public List<RingNode> Nodes { get; set; } = new();
+    public string PrimaryColor { get; set; } = "#FF000000";
+    public string SecondaryColor { get; set; } = "#80FFFFFF";
 
     [JsonIgnore]
     public int NodeCount => Nodes.Count;

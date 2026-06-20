@@ -1,4 +1,5 @@
 using Microsoft.UI;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
@@ -14,8 +15,11 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading.Tasks;
 using Windows.Devices.Enumeration;
+using Windows.Graphics;
 using Windows.Storage;
+using Windows.Storage.Pickers;
 using Windows.UI;
+using WinRT.Interop;
 
 namespace Galena_Action_Ring
 {
@@ -46,18 +50,22 @@ namespace Galena_Action_Ring
         private readonly List<RingProfile> _appProfiles = new();
         private int _selectedProfileIndex;
         private bool _suppressTabChange;
+        private bool _suppressActionTypeChange;
 
         // Canvas sizing
         private const double ActualOsdSize = 400;
         private const double CanvasViewport = 400;
         private double Scale => CanvasViewport / ActualOsdSize;
 
-        // Brushes
-        private static readonly SolidColorBrush NodeFill = new(Color.FromArgb(255, 26, 26, 26));
-        private static readonly SolidColorBrush NodeForeground = new(Colors.White);
-        private static readonly SolidColorBrush NodeActiveStroke = new(Color.FromArgb(255, 0, 120, 212));
+        // Brushes (synced with OsdWindow styling)
+        private static readonly SolidColorBrush InactiveFill = new(Color.FromArgb(128, 255, 255, 255));
+        private static readonly SolidColorBrush InactiveStroke = new(Color.FromArgb(255, 102, 102, 102));
+        private static readonly SolidColorBrush InactiveForeground = new(Color.FromArgb(255, 0, 0, 0));
+        private static readonly SolidColorBrush ActiveFill = new(Color.FromArgb(255, 0, 0, 0));
+        private static readonly SolidColorBrush ActiveStroke = new(Color.FromArgb(255, 255, 255, 255));
+        private static readonly SolidColorBrush ActiveForeground = new(Color.FromArgb(255, 255, 255, 255));
         private static readonly SolidColorBrush NodeLabelBrush = new(Colors.Black);
-        private static readonly SolidColorBrush CenterBrush = new(Color.FromArgb(255, 200, 200, 200));
+        private static readonly SolidColorBrush CenterFill = new(Color.FromArgb(128, 255, 255, 255));
 
         public MainWindow()
         {
@@ -78,12 +86,18 @@ namespace Galena_Action_Ring
             };
             _trayService.Setup(this);
 
+            SetMinWindowSize();
+
             InitAppProfiles();
-            BuildActionCategories();
             LoadCurrentProfile();
 
             _ = RefreshDeviceListAsync();
             StartPollTimer();
+        }
+
+        private void SetMinWindowSize()
+        {
+            NativeMethods.SetWindowPosition(this, 1000, 700);
         }
 
         public void HideToTray()
@@ -423,6 +437,7 @@ namespace Galena_Action_Ring
             var tag = (args.InvokedItemContainer as NavigationViewItem)?.Tag as string;
             var isBT = tag == "Bluetooth";
             BluetoothPage.Visibility = isBT ? Visibility.Visible : Visibility.Collapsed;
+            BluetoothScrollViewer.Visibility = isBT ? Visibility.Visible : Visibility.Collapsed;
             ConfigurePage.Visibility = tag == "Configure" ? Visibility.Visible : Visibility.Collapsed;
             DevicesTitle.Visibility = isBT ? Visibility.Visible : Visibility.Collapsed;
             DevicesTitle.Text = isBT ? "Devices" : "";
@@ -447,6 +462,7 @@ namespace Galena_Action_Ring
             }
             _selectedProfileIndex = 0;
             RefreshAppProfileTabs();
+            PopulateIconGallery();
         }
 
         private void RefreshAppProfileTabs()
@@ -480,20 +496,6 @@ namespace Galena_Action_Ring
             LoadCurrentProfile();
         }
 
-        private void AddAppProfileBtn_Click(object sender, RoutedEventArgs e)
-        {
-            var newProfile = new RingProfile
-            {
-                Name = $"Profile {_appProfiles.Count + 1}",
-                Radius = 120,
-                Nodes = ProfileService.CreateDefault().Nodes
-            };
-            ProfileService.SaveProfile(newProfile);
-            _appProfiles.Add(newProfile);
-            _selectedProfileIndex = _appProfiles.Count - 1;
-            RefreshAppProfileTabs();
-            LoadCurrentProfile();
-        }
 
         private void LoadCurrentProfile()
         {
@@ -507,18 +509,164 @@ namespace Galena_Action_Ring
             CanvasBackBtn.Visibility = Visibility.Collapsed;
             _selectedCanvasIndex = -1;
             RenderCanvas();
+            SelectProfileColors();
         }
 
         private void SaveCurrentProfile()
         {
             if (_selectedProfileIndex < 0 || _selectedProfileIndex >= _appProfiles.Count) return;
             var profile = _appProfiles[_selectedProfileIndex];
+
+            var duplicate = _appProfiles
+                .Select((p, i) => (p, i))
+                .FirstOrDefault(x => x.i != _selectedProfileIndex &&
+                                     string.Equals(x.p.Name, profile.Name, StringComparison.OrdinalIgnoreCase));
+            if (duplicate.p != null)
+            {
+                _ = ShowErrorDialog($"A ring named \"{profile.Name}\" already exists. Choose a different name.");
+                return;
+            }
+
             profile.Nodes = _activeNodes.ToList();
             ProfileService.SaveProfile(profile);
             OsdService.Instance.ReloadProfile(profile.Name);
         }
 
-        private void SaveProfileBtn_Click(object sender, RoutedEventArgs e) => SaveCurrentProfile();
+        private async Task ShowErrorDialog(string message)
+        {
+            var dialog = new ContentDialog
+            {
+                Title = "Error",
+                Content = message,
+                CloseButtonText = "OK",
+                XamlRoot = AppRoot.XamlRoot
+            };
+            await dialog.ShowAsync();
+        }
+
+        private async void AddRingBtn_Click(object sender, RoutedEventArgs e)
+        {
+            var nameBox = new TextBox
+            {
+                PlaceholderText = "Enter ring name",
+                Margin = new Thickness(0, 8, 0, 0)
+            };
+
+            var dialog = new ContentDialog
+            {
+                Title = "New Ring",
+                PrimaryButtonText = "Create",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = AppRoot.XamlRoot,
+                Content = nameBox,
+            };
+
+            dialog.Loaded += (_, _) => nameBox.Focus(FocusState.Programmatic);
+
+            var result = await dialog.ShowAsync();
+            if (result != ContentDialogResult.Primary) return;
+
+            var ringName = nameBox.Text.Trim();
+            if (string.IsNullOrWhiteSpace(ringName))
+            {
+                await ShowErrorDialog("Ring name cannot be empty.");
+                return;
+            }
+
+            if (_appProfiles.Any(p => string.Equals(p.Name, ringName, StringComparison.OrdinalIgnoreCase)))
+            {
+                await ShowErrorDialog($"A ring named \"{ringName}\" already exists. Choose a different name.");
+                return;
+            }
+
+            var newProfile = new RingProfile
+            {
+                Name = ringName,
+                Radius = 120,
+                Nodes = new List<RingNode>()
+            };
+            ProfileService.SaveProfile(newProfile);
+            _appProfiles.Add(newProfile);
+            _selectedProfileIndex = _appProfiles.Count - 1;
+            RefreshAppProfileTabs();
+            LoadCurrentProfile();
+        }
+
+        private async void DeleteRingBtn_Click(object sender, RoutedEventArgs e)
+        {
+            if (_appProfiles.Count <= 1)
+            {
+                await ShowErrorDialog("You must have at least one ring. Cannot delete the last ring.");
+                return;
+            }
+
+            var profile = _appProfiles[_selectedProfileIndex];
+            var confirm = new ContentDialog
+            {
+                Title = "Delete Ring",
+                Content = $"Delete \"{profile.Name}\"? This cannot be undone.",
+                PrimaryButtonText = "Delete",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Close,
+                XamlRoot = AppRoot.XamlRoot
+            };
+
+            var result = await confirm.ShowAsync();
+            if (result != ContentDialogResult.Primary) return;
+
+            ProfileService.DeleteProfile(profile.Name);
+            _appProfiles.RemoveAt(_selectedProfileIndex);
+            _selectedProfileIndex = Math.Max(0, _selectedProfileIndex - 1);
+            RefreshAppProfileTabs();
+            LoadCurrentProfile();
+        }
+
+        private async void RenameRingBtn_Click(object sender, RoutedEventArgs e)
+        {
+            if (_selectedProfileIndex < 0 || _selectedProfileIndex >= _appProfiles.Count) return;
+            var profile = _appProfiles[_selectedProfileIndex];
+
+            var nameBox = new TextBox { Text = profile.Name, Margin = new Thickness(0, 8, 0, 0) };
+
+            var dialog = new ContentDialog
+            {
+                Title = "Rename Ring",
+                PrimaryButtonText = "Rename",
+                CloseButtonText = "Cancel",
+                DefaultButton = ContentDialogButton.Primary,
+                XamlRoot = AppRoot.XamlRoot,
+                Content = nameBox,
+            };
+
+            dialog.Loaded += (_, _) =>
+            {
+                nameBox.Focus(FocusState.Programmatic);
+                nameBox.SelectAll();
+            };
+
+            var result = await dialog.ShowAsync();
+            if (result != ContentDialogResult.Primary) return;
+
+            var newName = nameBox.Text.Trim();
+            if (string.IsNullOrWhiteSpace(newName))
+            {
+                await ShowErrorDialog("Ring name cannot be empty.");
+                return;
+            }
+
+            if (_appProfiles.Any(p => p != profile && string.Equals(p.Name, newName, StringComparison.OrdinalIgnoreCase)))
+            {
+                await ShowErrorDialog($"A ring named \"{newName}\" already exists. Choose a different name.");
+                return;
+            }
+
+            ProfileService.DeleteProfile(profile.Name);
+            profile.Name = newName;
+            ProfileService.SaveProfile(profile);
+            RefreshAppProfileTabs();
+            CanvasTitle.Text = profile.Name;
+        }
 
         // --- Canvas Rendering ---
         private void RenderCanvas()
@@ -528,9 +676,8 @@ namespace Galena_Action_Ring
             var count = _canvasNodes.Count;
 
             var radius = 120.0 * Scale;
-            var circleSize = 56.0 * Scale;
-            var fontSize = 24.0 * Scale;
-            var labelFontSize = 13.0;
+            var circleSize = 64.0 * Scale;
+            var fontSize = 28.0 * Scale;
             var cx = CanvasViewport / 2;
             var cy = CanvasViewport / 2;
 
@@ -548,41 +695,27 @@ namespace Galena_Action_Ring
                     Canvas.SetLeft(grid, x - circleSize / 2);
                     Canvas.SetTop(grid, y - circleSize / 2);
 
-                    var ellipse = new Ellipse { Width = circleSize, Height = circleSize, Fill = NodeFill };
-                    if (i == _selectedCanvasIndex)
+                    var isSelected = i == _selectedCanvasIndex;
+                    var ellipse = new Ellipse
                     {
-                        ellipse.Stroke = NodeActiveStroke;
-                        ellipse.StrokeThickness = 3;
-                    }
+                        Width = circleSize,
+                        Height = circleSize,
+                        Fill = isSelected ? ActiveFill : InactiveFill,
+                        Stroke = isSelected ? ActiveStroke : null,
+                        StrokeThickness = isSelected ? 2 : 0,
+                    };
                     grid.Children.Add(ellipse);
 
                     var icon = new FontIcon
                     {
-                        FontFamily = new FontFamily("Segoe MDL2 Assets"),
+                        FontFamily = new FontFamily(MaterialIcons.FontFamilyName),
                         Glyph = _canvasNodes[i].Glyph,
                         FontSize = fontSize,
-                        Foreground = NodeForeground,
+                        Foreground = isSelected ? ActiveForeground : InactiveForeground,
                     };
                     grid.Children.Add(icon);
                     RingCanvas.Children.Add(grid);
                     _canvasElements.Add(grid);
-
-                    var label = new TextBlock
-                    {
-                        Text = _canvasNodes[i].Label,
-                        FontSize = labelFontSize,
-                        Foreground = NodeLabelBrush,
-                        TextAlignment = TextAlignment.Center,
-                        MaxWidth = 100,
-                        TextWrapping = TextWrapping.NoWrap,
-                        TextTrimming = TextTrimming.CharacterEllipsis,
-                    };
-                    var labelDist = circleSize / 2 + 10;
-                    var lx = cx + (radius + labelDist) * Math.Sin(angle);
-                    var ly = cy - (radius + labelDist) * Math.Cos(angle);
-                    Canvas.SetLeft(label, lx - 50);
-                    Canvas.SetTop(label, ly - 8);
-                    RingCanvas.Children.Add(label);
                 }
             }
 
@@ -590,13 +723,13 @@ namespace Galena_Action_Ring
             var cg = new Grid { Width = ccs, Height = ccs };
             Canvas.SetLeft(cg, cx - ccs / 2);
             Canvas.SetTop(cg, cy - ccs / 2);
-            cg.Children.Add(new Ellipse { Width = ccs, Height = ccs, Fill = CenterBrush });
+            cg.Children.Add(new Ellipse { Width = ccs, Height = ccs, Fill = CenterFill, Stroke = InactiveStroke, StrokeThickness = 1 });
             cg.Children.Add(new FontIcon
             {
-                FontFamily = new FontFamily("Segoe MDL2 Assets"),
-                Glyph = _canvasStack.Count > 0 ? "\uE72B" : "\uE711",
+                FontFamily = new FontFamily(MaterialIcons.FontFamilyName),
+                Glyph = _canvasStack.Count > 0 ? "\uE5C4" : "\uE5CD",
                 FontSize = 10,
-                Foreground = new SolidColorBrush(Colors.Black),
+                Foreground = InactiveForeground,
             });
             RingCanvas.Children.Add(cg);
         }
@@ -682,26 +815,45 @@ namespace Galena_Action_Ring
         // --- Node Properties ---
         private void ShowNodeProperties(RingNode node)
         {
-            NodePropertiesCard.Visibility = Visibility.Visible;
+            NodeEditDefaultText.Visibility = Visibility.Collapsed;
+            NodeEditPanel.Visibility = Visibility.Visible;
+
+            PropGlyphPreview.FontFamily = new FontFamily(MaterialIcons.FontFamilyName);
             PropGlyphPreview.Glyph = node.Glyph;
             PropLabelDisplay.Text = node.Label;
             PropActionDisplay.Text = node.ActionType.ToString();
             PropLabelBox.Text = node.Label;
-            PropActionDataBox.Text = node.ActionData;
-            PropActionDataBox.PlaceholderText = node.ActionType switch
+
+            // Show/hide conditional fields
+            PropUrlBox.Visibility = node.ActionType == ActionType.OpenUrl ? Visibility.Visible : Visibility.Collapsed;
+            PropAppPicker.Visibility = node.ActionType == ActionType.LaunchApp ? Visibility.Visible : Visibility.Collapsed;
+            if (node.ActionType == ActionType.OpenUrl)
             {
-                ActionType.LaunchApp => "Path to .exe or shortcut",
-                ActionType.OpenUrl => "https://...",
-                ActionType.TextExpansion => "Text snippet to paste",
-                _ => ""
-            };
+                PropUrlBox.Text = node.ActionData;
+            }
+            else if (node.ActionType == ActionType.LaunchApp)
+            {
+                PropAppPathBox.Text = node.ActionData;
+            }
+
             EditSubmenuBtn.Visibility = node.ActionType == ActionType.Folder
                 ? Visibility.Visible : Visibility.Collapsed;
+
+            // Populate ActionType ComboBox
+            _suppressActionTypeChange = true;
+            PropActionTypeBox.Items.Clear();
+            foreach (ActionType at in Enum.GetValues<ActionType>())
+                PropActionTypeBox.Items.Add(at);
+            PropActionTypeBox.SelectedItem = node.ActionType;
+            _suppressActionTypeChange = false;
         }
 
         private void HideNodeProperties()
         {
-            NodePropertiesCard.Visibility = Visibility.Collapsed;
+            NodeEditPanel.Visibility = Visibility.Collapsed;
+            NodeEditDefaultText.Visibility = Visibility.Visible;
+            _selectedCanvasIndex = -1;
+            RenderCanvas();
         }
 
         private void PropLabelBox_TextChanged(object sender, TextChangedEventArgs e)
@@ -712,29 +864,40 @@ namespace Galena_Action_Ring
             RenderCanvas();
         }
 
-        private void PropActionDataBox_TextChanged(object sender, TextChangedEventArgs e)
+        private void PropActionTypeBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
+            if (_suppressActionTypeChange) return;
             if (_selectedCanvasIndex < 0 || _selectedCanvasIndex >= _canvasNodes.Count) return;
-            _canvasNodes[_selectedCanvasIndex].ActionData = PropActionDataBox.Text;
+            if (PropActionTypeBox.SelectedItem is not ActionType newType) return;
+
+            var node = _canvasNodes[_selectedCanvasIndex];
+            node.ActionType = newType;
+            node.ActionData = newType switch
+            {
+                ActionType.LaunchApp => "",
+                ActionType.OpenUrl => "",
+                ActionType.TextExpansion => "",
+                _ => ""
+            };
+            PropActionDisplay.Text = newType.ToString();
+
+            // Update conditional fields
+            PropUrlBox.Visibility = newType == ActionType.OpenUrl ? Visibility.Visible : Visibility.Collapsed;
+            PropAppPicker.Visibility = newType == ActionType.LaunchApp ? Visibility.Visible : Visibility.Collapsed;
+            if (newType == ActionType.OpenUrl)
+                PropUrlBox.Text = node.ActionData;
+            else if (newType == ActionType.LaunchApp)
+                PropAppPathBox.Text = node.ActionData;
+
+            EditSubmenuBtn.Visibility = newType == ActionType.Folder
+                ? Visibility.Visible : Visibility.Collapsed;
+            RenderCanvas();
         }
 
-        // --- Add/Remove Nodes ---
-        private void AddNodeBtn_Click(object sender, RoutedEventArgs e)
+        private void NodeEditSaveBtn_Click(object sender, RoutedEventArgs e)
         {
-            var newNode = new RingNode { Glyph = "\uE710", Label = "New", ActionType = ActionType.None };
-            _activeNodes.Add(newNode);
-            _selectedCanvasIndex = _activeNodes.Count - 1;
-            RenderCanvas();
-            ShowNodeProperties(newNode);
-        }
-
-        private void RemoveNodeBtn_Click(object sender, RoutedEventArgs e)
-        {
-            if (_selectedCanvasIndex < 0 || _canvasNodes.Count <= 2) return;
-            _activeNodes.RemoveAt(_selectedCanvasIndex);
-            _selectedCanvasIndex = -1;
-            HideNodeProperties();
-            RenderCanvas();
+            SaveCurrentProfile();
+            OsdService.Instance.ReloadProfile(OsdService.Instance.CurrentProfile.Name);
         }
 
         // --- Sub-menu Navigation ---
@@ -768,117 +931,6 @@ namespace Galena_Action_Ring
             RenderCanvas();
         }
 
-        // --- Action Categories ---
-        private void BuildActionCategories()
-        {
-            ActionCategories.Children.Clear();
-
-            var categories = new (string Title, string Icon, (string Glyph, string Label, ActionType Type)[] Actions)[]
-            {
-                ("MEDIA & VOLUME", "\uE767", new[]
-                {
-                    ("\uE995", "Volume Up", ActionType.VolumeUp),
-                    ("\uE994", "Volume Down", ActionType.VolumeDown),
-                    ("\uE74F", "Mute", ActionType.MuteToggle),
-                    ("\uE768", "Play/Pause", ActionType.MediaPlayPause),
-                    ("\uE7E8", "Next Track", ActionType.MediaNext),
-                    ("\uE7E9", "Previous Track", ActionType.MediaPrevious),
-                }),
-                ("OPEN", "\uE774", new[]
-                {
-                    ("\uE774", "Launch App", ActionType.LaunchApp),
-                    ("\uE770", "Open URL", ActionType.OpenUrl),
-                }),
-                ("NAVIGATION", "\uE72B", Array.Empty<(string, string, ActionType)>()),
-                ("UTILITIES", "\uE713", new[]
-                {
-                    ("\uE70F", "Text Expansion", ActionType.TextExpansion),
-                    ("\uE711", "Close OSD", ActionType.CloseOsd),
-                }),
-                ("SYSTEM", "\uE770", new[]
-                {
-                    ("\uE706", "Brightness Up", ActionType.BrightnessUp),
-                    ("\uE708", "Brightness Down", ActionType.BrightnessDown),
-                }),
-                ("ADVANCED", "\uE8B7", new[]
-                {
-                    ("\uE8B7", "Folder (Sub-menu)", ActionType.Folder),
-                }),
-            };
-
-            foreach (var (title, icon, actions) in categories)
-            {
-                var expander = new Expander
-                {
-                    Header = title,
-                    FontSize = 12,
-                    FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-                    Margin = new Thickness(0),
-                };
-
-                if (actions.Length > 0)
-                {
-                    var panel = new StackPanel { Spacing = 0 };
-                    foreach (var (glyph, label, actionType) in actions)
-                    {
-                        var btn = new Button
-                        {
-                            HorizontalAlignment = HorizontalAlignment.Stretch,
-                            HorizontalContentAlignment = HorizontalAlignment.Left,
-                            Background = new SolidColorBrush(Colors.Transparent),
-                            BorderThickness = new Thickness(0),
-                            Padding = new Thickness(16, 8, 16, 8),
-                            Tag = (glyph, actionType),
-                        };
-
-                        var row = new Grid { Width = 280 };
-                        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Auto) });
-                        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(12) });
-                        row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
-
-                        row.Children.Add(new FontIcon
-                        {
-                            FontFamily = new FontFamily("Segoe MDL2 Assets"),
-                            Glyph = glyph,
-                            FontSize = 16,
-                            VerticalAlignment = VerticalAlignment.Center,
-                        });
-                        var lbl = new TextBlock
-                        {
-                            Text = label,
-                            FontSize = 13,
-                            VerticalAlignment = VerticalAlignment.Center,
-                            Margin = new Thickness(12, 0, 0, 0),
-                        };
-                        Grid.SetColumn(lbl, 2);
-                        row.Children.Add(lbl);
-                        btn.Content = row;
-
-                        var capturedGlyph = glyph;
-                        var capturedType = actionType;
-                        var capturedLabel = label;
-                        btn.Click += (_, _) => AddActionToRing(capturedGlyph, capturedType, capturedLabel);
-                        panel.Children.Add(btn);
-                    }
-                    expander.Content = panel;
-                }
-                else
-                {
-                    expander.Content = new TextBlock
-                    {
-                        Text = "Coming soon",
-                        FontSize = 12,
-                        Foreground = new SolidColorBrush(Color.FromArgb(255, 150, 150, 150)),
-                        Margin = new Thickness(16, 8, 16, 8),
-                    };
-                }
-
-                ActionCategories.Children.Add(expander);
-            }
-
-            ActionSearchBox.TextChanged += ActionSearchBox_TextChanged;
-        }
-
         private void AddActionToRing(string glyph, ActionType type, string label)
         {
             var newNode = new RingNode
@@ -903,111 +955,158 @@ namespace Galena_Action_Ring
             ShowNodeProperties(newNode);
         }
 
-        private void ActionSearchBox_TextChanged(object sender, TextChangedEventArgs e)
+        #endregion
+
+        #region Color & Icon Picker
+
+        private void PopulateIconGallery()
         {
-            var query = ActionSearchBox.Text?.Trim().ToLowerInvariant() ?? "";
-            foreach (var child in ActionCategories.Children)
+            IconGallery.ItemsSource = MaterialIcons.CommonIcons;
+        }
+
+        private void IconGallery_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (_selectedCanvasIndex < 0 || _selectedCanvasIndex >= _canvasNodes.Count) return;
+            if (IconGallery.SelectedItem is not MaterialIconInfo icon) return;
+            var node = _canvasNodes[_selectedCanvasIndex];
+            node.Glyph = icon.Glyph;
+            PropGlyphPreview.Glyph = icon.Glyph;
+            RenderCanvas();
+        }
+
+        private static Color HslToColor(double hue, double saturation = 1.0, double lightness = 0.7)
+        {
+            hue = ((hue % 360) + 360) % 360;
+            var c = (1 - Math.Abs(2 * lightness - 1)) * saturation;
+            var x = c * (1 - Math.Abs((hue / 60) % 2 - 1));
+            var m = lightness - c / 2;
+            double r, g, b;
+            if (hue < 60) { r = c; g = x; b = 0; }
+            else if (hue < 120) { r = x; g = c; b = 0; }
+            else if (hue < 180) { r = 0; g = c; b = x; }
+            else if (hue < 240) { r = 0; g = x; b = c; }
+            else if (hue < 300) { r = x; g = 0; b = c; }
+            else { r = c; g = 0; b = x; }
+            return Color.FromArgb(255,
+                (byte)((r + m) * 255),
+                (byte)((g + m) * 255),
+                (byte)((b + m) * 255));
+        }
+
+        private static string ColorToHex(Color c)
+        {
+            return $"#{c.A:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
+        }
+
+        private static Color ComplementaryColor(Color c)
+        {
+            var r = (byte)(255 - c.R);
+            var g = (byte)(255 - c.G);
+            var b = (byte)(255 - c.B);
+            // Blend with white for a softer complement
+            return Color.FromArgb(255,
+                (byte)((r + 255) / 2),
+                (byte)((g + 255) / 2),
+                (byte)((b + 255) / 2));
+        }
+
+        private void PrimaryColorSlider_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+        {
+            if (_selectedProfileIndex < 0 || _selectedProfileIndex >= _appProfiles.Count) return;
+            var profile = _appProfiles[_selectedProfileIndex];
+            var hue = PrimaryColorSlider.Value;
+            var primary = HslToColor(hue);
+            var secondary = ComplementaryColor(primary);
+
+            PrimaryPreview.Background = new SolidColorBrush(primary);
+            SecondaryPreview.Background = new SolidColorBrush(secondary);
+
+            profile.PrimaryColor = ColorToHex(primary);
+            profile.SecondaryColor = ColorToHex(secondary);
+            SaveCurrentProfile();
+            OsdService.Instance.ReloadProfile(profile.Name);
+        }
+
+        private void SelectProfileColors()
+        {
+            if (_selectedProfileIndex < 0 || _selectedProfileIndex >= _appProfiles.Count) return;
+            var profile = _appProfiles[_selectedProfileIndex];
+            if (TryParseColor(profile.PrimaryColor, out var primary))
             {
-                if (child is Expander exp && exp.Content is StackPanel panel)
+                var max = Math.Max(primary.R, Math.Max(primary.G, primary.B));
+                var min = Math.Min(primary.R, Math.Min(primary.G, primary.B));
+                double hue = 0;
+                if (max != min)
                 {
-                    var hasMatch = string.IsNullOrEmpty(query);
-                    foreach (var btn in panel.Children.OfType<Button>())
-                    {
-                        if (btn.Content is Grid grid && grid.Children.Count >= 3)
-                        {
-                            var lbl = grid.Children.OfType<TextBlock>().FirstOrDefault();
-                            if (lbl != null)
-                            {
-                                var match = string.IsNullOrEmpty(query) ||
-                                            lbl.Text.ToLowerInvariant().Contains(query);
-                                btn.Visibility = match ? Visibility.Visible : Visibility.Collapsed;
-                                if (match && !string.IsNullOrEmpty(query)) hasMatch = true;
-                            }
-                        }
-                    }
-                    exp.Visibility = hasMatch ? Visibility.Visible : Visibility.Collapsed;
-                    if (!string.IsNullOrEmpty(query) && hasMatch) exp.IsExpanded = true;
+                    var d = max - min;
+                    if (max == primary.R) hue = 60 * (((primary.G - primary.B) / d) % 6);
+                    else if (max == primary.G) hue = 60 * (((primary.B - primary.R) / d) + 2);
+                    else hue = 60 * (((primary.R - primary.G) / d) + 4);
+                }
+                if (hue < 0) hue += 360;
+                PrimaryColorSlider.Value = hue;
+            }
+            PrimaryPreview.Background = new SolidColorBrush(primary);
+            if (TryParseColor(profile.SecondaryColor, out var secondary))
+                SecondaryPreview.Background = new SolidColorBrush(secondary);
+        }
+
+        private static bool TryParseColor(string hex, out Color color)
+        {
+            color = Colors.Transparent;
+            try
+            {
+                if (hex.Length >= 7 && hex[0] == '#')
+                {
+                    var a = hex.Length >= 9 ? System.Convert.ToByte(hex.Substring(1, 2), 16) : (byte)255;
+                    var r = System.Convert.ToByte(hex.Substring(hex.Length - 6, 2), 16);
+                    var g = System.Convert.ToByte(hex.Substring(hex.Length - 4, 2), 16);
+                    var b = System.Convert.ToByte(hex.Substring(hex.Length - 2, 2), 16);
+                    color = Color.FromArgb(a, r, g, b);
+                    return true;
                 }
             }
+            catch { }
+            return false;
         }
 
         #endregion
 
-        #region Icon Picker
+        #region URL & App Picker
 
-        private static readonly (string Glyph, string Label)[] CommonIcons =
+        private void PropUrlBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            ("\uE774", "Globe"), ("\uE8B9", "Video"), ("\uE995", "Vol+"), ("\uE994", "Vol-"),
-            ("\uE74F", "Mute"), ("\uE767", "Mute2"), ("\uE706", "Bright+"), ("\uE708", "Bright-"),
-            ("\uE768", "Play"), ("\uE769", "Pause"), ("\uE7E8", "Next"), ("\uE7E9", "Prev"),
-            ("\uEC4F", "Music"), ("\uE713", "Gear"), ("\uE80F", "Home"), ("\uE721", "Search"),
-            ("\uE722", "Camera"), ("\uE72E", "Lock"), ("\uE702", "BT"), ("\uE88E", "USB"),
-            ("\uE701", "WiFi"), ("\uE7BE", "Light"), ("\uE73E", "Check"), ("\uE711", "Close"),
-            ("\uE710", "Add"), ("\uE74D", "Delete"), ("\uE70F", "Edit"), ("\uE72D", "Share"),
-            ("\uE734", "Star"), ("\uE72C", "Refresh"), ("\uE736", "Down"), ("\uE735", "Up"),
-            ("\uE121", "Clock"), ("\uE787", "Cal"), ("\uE716", "People"), ("\uE717", "Phone"),
-            ("\uE714", "Video2"), ("\uE71B", "Link"), ("\uE8B7", "Folder"), ("\uE7C3", "File"),
-            ("\uE74E", "Save"), ("\uE8EF", "Calc"),
-        };
+            if (_selectedCanvasIndex < 0 || _selectedCanvasIndex >= _canvasNodes.Count) return;
+            _canvasNodes[_selectedCanvasIndex].ActionData = PropUrlBox.Text;
+        }
 
-        private void IconPickerBtn_Click(object sender, RoutedEventArgs e)
+        private void PropAppPathBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            var flyout = new Flyout();
-            var root = new StackPanel { Spacing = 8, Width = 310 };
+            if (_selectedCanvasIndex < 0 || _selectedCanvasIndex >= _canvasNodes.Count) return;
+            _canvasNodes[_selectedCanvasIndex].ActionData = PropAppPathBox.Text;
+        }
 
-            var searchBox = new TextBox { PlaceholderText = "Search icons...", Margin = new Thickness(0) };
-            var grid = new Grid();
-            var columns = 6;
-            var rows = (int)Math.Ceiling((double)CommonIcons.Length / columns);
-            for (int i = 0; i < rows; i++)
-                grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(48) });
-            for (int i = 0; i < columns; i++)
-                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(48) });
-
-            var allBtns = new List<(Button Btn, string Label)>();
-            for (int i = 0; i < CommonIcons.Length; i++)
+        private async void PropAppBrowseBtn_Click(object sender, RoutedEventArgs e)
+        {
+            var picker = new Windows.Storage.Pickers.FileOpenPicker
             {
-                var btn = new Button
-                {
-                    Width = 44, Height = 44,
-                    Content = new FontIcon
-                    {
-                        FontFamily = new FontFamily("Segoe MDL2 Assets"),
-                        Glyph = CommonIcons[i].Glyph,
-                        FontSize = 18,
-                    },
-                    Margin = new Thickness(2),
-                };
-                var glyph = CommonIcons[i].Glyph;
-                btn.Click += (_, _) =>
-                {
-                    if (_selectedCanvasIndex >= 0 && _selectedCanvasIndex < _canvasNodes.Count)
-                    {
-                        _canvasNodes[_selectedCanvasIndex].Glyph = glyph;
-                        PropGlyphPreview.Glyph = glyph;
-                        RenderCanvas();
-                    }
-                    flyout.Hide();
-                };
-                Grid.SetRow(btn, i / columns);
-                Grid.SetColumn(btn, i % columns);
-                grid.Children.Add(btn);
-                allBtns.Add((btn, CommonIcons[i].Label.ToLowerInvariant()));
-            }
-
-            searchBox.TextChanged += (_, _) =>
-            {
-                var q = searchBox.Text?.Trim().ToLowerInvariant() ?? "";
-                foreach (var (btn, label) in allBtns)
-                    btn.Visibility = string.IsNullOrEmpty(q) || label.Contains(q)
-                        ? Visibility.Visible : Visibility.Collapsed;
+                ViewMode = Windows.Storage.Pickers.PickerViewMode.List,
+                SuggestedStartLocation = Windows.Storage.Pickers.PickerLocationId.ComputerFolder,
             };
+            picker.FileTypeFilter.Add(".exe");
+            picker.FileTypeFilter.Add(".lnk");
+            picker.FileTypeFilter.Add(".bat");
 
-            root.Children.Add(searchBox);
-            root.Children.Add(new ScrollViewer { Content = grid, Height = 250 });
-            flyout.Content = root;
-            IconPickerBtn.Flyout = flyout;
-            flyout.ShowAt(IconPickerBtn);
+            var hwnd = WinRT.Interop.WindowNative.GetWindowHandle(this);
+            WinRT.Interop.InitializeWithWindow.Initialize(picker, hwnd);
+
+            var file = await picker.PickSingleFileAsync();
+            if (file != null)
+            {
+                PropAppPathBox.Text = file.Path;
+                if (_selectedCanvasIndex >= 0 && _selectedCanvasIndex < _canvasNodes.Count)
+                    _canvasNodes[_selectedCanvasIndex].ActionData = file.Path;
+            }
         }
 
         #endregion
@@ -1018,7 +1117,7 @@ namespace Galena_Action_Ring
     {
         public RingProfile Profile { get; set; } = new();
         public string DisplayName { get; set; } = "";
-        public string Icon { get; set; } = "\uE713";
+        public string Icon { get; set; } = "\uE8B8";
         public SolidColorBrush IconBrush { get; set; } = new(Colors.Gray);
     }
 
@@ -1041,9 +1140,9 @@ namespace Galena_Action_Ring
 
         public string IconGlyph => Type switch
         {
-            DeviceType.Bluetooth => "\uE702",
-            DeviceType.Usb => "\uE88E",
-            _ => "\uE770"
+            DeviceType.Bluetooth => "\uE1A7",
+            DeviceType.Usb => "\uE226",
+            _ => "\uE31E"
         };
 
         private static readonly SolidColorBrush ConnectedBrush = new(Color.FromArgb(255, 16, 185, 129));

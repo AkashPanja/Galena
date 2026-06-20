@@ -61,16 +61,25 @@ public class ProfileService
         {
             Name = "Default",
             Radius = 120,
+            PrimaryColor = "#FF000000",
+            SecondaryColor = "#80FFFFFF",
             Nodes = new List<RingNode>
             {
-                new() { Glyph = "\uE774", Label = "Chrome",  ActionType = ActionType.LaunchApp,  ActionData = "chrome" },
-                new() { Glyph = "\uE8B9", Label = "VLC",     ActionType = ActionType.LaunchApp,  ActionData = "vlc" },
-                new() { Glyph = "\uE995", Label = "Vol+",    ActionType = ActionType.VolumeUp },
-                new() { Glyph = "\uE994", Label = "Vol-",    ActionType = ActionType.VolumeDown },
-                new() { Glyph = "\uE74F", Label = "Mute",    ActionType = ActionType.MuteToggle },
-                new() { Glyph = "\uE706", Label = "Bright+", ActionType = ActionType.BrightnessUp },
-                new() { Glyph = "\uE708", Label = "Bright-", ActionType = ActionType.BrightnessDown },
-                new() { Glyph = "\uE768", Label = "Play",    ActionType = ActionType.MediaPlayPause },
+                new() { Glyph = "\uE050", Label = "Volume", ActionType = ActionType.VolumeControl, Category = ActionCategory.Group },
+                new() { Glyph = "\uE1AC", Label = "Brightness", ActionType = ActionType.BrightnessControl, Category = ActionCategory.Group },
+                new() { Glyph = "\uEA07", Label = "Chrome",  ActionType = ActionType.LaunchApp,  ActionData = "chrome" },
+                new() { Glyph = "\uEA5F", Label = "Calc",    ActionType = ActionType.LaunchApp,  ActionData = "calc" },
+                new() { Glyph = "\uE04F", Label = "Mute",    ActionType = ActionType.MuteToggle },
+                new() { Glyph = "\uE05F", Label = "Media",   ActionType = ActionType.Folder, Category = ActionCategory.Folder,
+                        Children = new List<RingNode>
+                        {
+                            new() { Glyph = "\uE01F", Label = "Seek",    ActionType = ActionType.MediaSeekForward },
+                            new() { Glyph = "\uE037", Label = "Play",    ActionType = ActionType.MediaPlayPause },
+                            new() { Glyph = "\uE044", Label = "Next",    ActionType = ActionType.MediaNext },
+                            new() { Glyph = "\uE045", Label = "Prev",    ActionType = ActionType.MediaPrevious },
+                        }},
+                new() { Glyph = "\uF03D", Label = "Night",   ActionType = ActionType.ToggleNightLight },
+                new() { Glyph = "\uE0C9", Label = "ChatGPT", ActionType = ActionType.OpenUrl, ActionData = "https://chatgpt.com" },
             }
         };
     }
