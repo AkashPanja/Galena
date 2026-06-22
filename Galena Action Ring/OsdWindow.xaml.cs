@@ -24,7 +24,6 @@ public sealed partial class OsdWindow : Window
     private const uint SWP_NOACTIVATE = 0x0010;
     private const uint SWP_NOMOVE = 0x0002;
     private const uint SWP_NOSIZE = 0x0001;
-
     private readonly List<Grid> _optionElements = new();
     private readonly List<Ellipse> _optionCircles = new();
     private readonly List<FontIcon> _optionIcons = new();
@@ -156,10 +155,6 @@ public sealed partial class OsdWindow : Window
     {
         percent = Math.Clamp(percent, 0, 100);
         RadialPercent.Text = $"{percent}%";
-        var circ = 628.0; // π * 200
-        var offset = circ * (100 - percent) / 100.0;
-        RadialArc.StrokeDashOffset = -offset;
-        RadialArc.Stroke = percent > 0 ? ActiveFill : new SolidColorBrush(Colors.Gray);
     }
 
     public void HideRadialProgress()
@@ -184,52 +179,10 @@ public sealed partial class OsdWindow : Window
 
     #endregion
 
-    #region Seek Mode
-
-    public void ShowSeekMode()
+    public void SetCenterGlyph(string glyph)
     {
-        SeekLabel.Text = "Seek";
-        SeekIndicator.Text = "";
-        SeekLayer.Visibility = Visibility.Visible;
-        SeekLayer.Opacity = 0;
-
-        var fadeIn = new DoubleAnimation
-        {
-            From = 0, To = 1,
-            Duration = new Duration(TimeSpan.FromMilliseconds(200)),
-        };
-        Storyboard.SetTarget(fadeIn, SeekLayer);
-        Storyboard.SetTargetProperty(fadeIn, "Opacity");
-        var sb = new Storyboard();
-        sb.Children.Add(fadeIn);
-        sb.Begin();
+        CenterIcon.Glyph = glyph;
     }
-
-    public void UpdateSeekIndicator(string text)
-    {
-        SeekIndicator.Text = text;
-    }
-
-    public void HideSeekMode()
-    {
-        var fadeOut = new DoubleAnimation
-        {
-            From = 1, To = 0,
-            Duration = new Duration(TimeSpan.FromMilliseconds(150)),
-        };
-        Storyboard.SetTarget(fadeOut, SeekLayer);
-        Storyboard.SetTargetProperty(fadeOut, "Opacity");
-        var sb = new Storyboard();
-        sb.Children.Add(fadeOut);
-        sb.Completed += (_, _) =>
-        {
-            SeekLayer.Visibility = Visibility.Collapsed;
-            SeekIndicator.Text = "";
-        };
-        sb.Begin();
-    }
-
-    #endregion
 
     public void LoadNodes(List<RingNode> nodes, int radius)
     {
@@ -504,6 +457,12 @@ public sealed partial class OsdWindow : Window
         }
 
         storyboard.Begin();
+    }
+
+    public void UpdateNodeIcon(int nodeIndex, string glyph)
+    {
+        if (nodeIndex < 0 || nodeIndex >= _optionIcons.Count) return;
+        _optionIcons[nodeIndex].Glyph = glyph;
     }
 
     public void SelectOption(int index)

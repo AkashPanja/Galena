@@ -70,7 +70,7 @@ public class ProfileService
                 new() { Glyph = "\uEA07", Label = "Chrome",  ActionType = ActionType.LaunchApp,  ActionData = "chrome" },
                 new() { Glyph = "\uEA5F", Label = "Calc",    ActionType = ActionType.LaunchApp,  ActionData = "calc" },
                 new() { Glyph = "\uE04F", Label = "Mute",    ActionType = ActionType.MuteToggle },
-                new() { Glyph = "\uE05F", Label = "Media",   ActionType = ActionType.Folder, Category = ActionCategory.Folder,
+                new() { Glyph = "\uE05F", Label = "Playback Control", ActionType = ActionType.Folder, Category = ActionCategory.Folder,
                         Children = new List<RingNode>
                         {
                             new() { Glyph = "\uE01F", Label = "Seek",    ActionType = ActionType.MediaSeekForward },

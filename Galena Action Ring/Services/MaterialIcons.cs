@@ -1,4 +1,7 @@
+using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 
 namespace Galena_Action_Ring;
 
@@ -12,6 +15,18 @@ public class MaterialIconInfo
 public static class MaterialIcons
 {
     public static readonly string FontFamilyName = "Assets/MaterialSymbols.ttf#Material Symbols Outlined";
+
+    private static List<MaterialIconInfo>? _allIcons;
+
+    public static List<MaterialIconInfo> AllIcons
+    {
+        get
+        {
+            if (_allIcons == null)
+                LoadAllIcons();
+            return _allIcons ?? new List<MaterialIconInfo>();
+        }
+    }
 
     public static List<MaterialIconInfo> CommonIcons { get; } = new()
     {
@@ -59,8 +74,6 @@ public static class MaterialIcons
         new() { Name = "more_vert", Glyph = "\uE5D4", DisplayName = "More" },
         new() { Name = "arrow_back", Glyph = "\uE5C4", DisplayName = "Arrow Back" },
         new() { Name = "arrow_forward", Glyph = "\uE5C8", DisplayName = "Arrow Forward" },
-        new() { Name = "arrow_drop_down", Glyph = "\uE5C5", DisplayName = "Arrow Drop Down" },
-        new() { Name = "arrow_drop_up", Glyph = "\uE5C7", DisplayName = "Arrow Drop Up" },
         new() { Name = "check", Glyph = "\uE5CA", DisplayName = "Check" },
         new() { Name = "check_circle", Glyph = "\uF0BE", DisplayName = "Check Circle" },
         new() { Name = "error", Glyph = "\uF8B6", DisplayName = "Error" },
@@ -103,21 +116,54 @@ public static class MaterialIcons
         new() { Name = "movie", Glyph = "\uE404", DisplayName = "Movie" },
         new() { Name = "music_video", Glyph = "\uE063", DisplayName = "Music Video" },
         new() { Name = "smart_display", Glyph = "\uF06A", DisplayName = "Smart Display" },
-        new() { Name = "smart_toy", Glyph = "\uF06C", DisplayName = "Smart Toy" },
         new() { Name = "light", Glyph = "\uE518", DisplayName = "Light" },
         new() { Name = "flash_on", Glyph = "\uE3E7", DisplayName = "Flash On" },
         new() { Name = "flash_off", Glyph = "\uE3E6", DisplayName = "Flash Off" },
         new() { Name = "screen_lock", Glyph = "\uE7C2", DisplayName = "Screen Lock" },
-        new() { Name = "screen_rotation", Glyph = "\uE7C3", DisplayName = "Screen Rotation" },
         new() { Name = "cast", Glyph = "\uE307", DisplayName = "Cast" },
-        new() { Name = "cast_connected", Glyph = "\uE308", DisplayName = "Cast Connected" },
-        new() { Name = "airplay", Glyph = "\uE055", DisplayName = "Airplay" },
         new() { Name = "download", Glyph = "\uF090", DisplayName = "Download" },
         new() { Name = "upload", Glyph = "\uF09B", DisplayName = "Upload" },
         new() { Name = "open_in_new", Glyph = "\uE89E", DisplayName = "Open In New" },
         new() { Name = "qr_code", Glyph = "\uEF6B", DisplayName = "QR Code" },
         new() { Name = "share", Glyph = "\uE80D", DisplayName = "Share" },
         new() { Name = "print", Glyph = "\uE8AD", DisplayName = "Print" },
-        new() { Name = "whatsapp", Glyph = "\uEA30", DisplayName = "WhatsApp" },
     };
+
+    private static void LoadAllIcons()
+    {
+        try
+        {
+            var path = System.IO.Path.Combine(AppContext.BaseDirectory, "Assets", "MaterialSymbols.codepoints");
+            if (!System.IO.File.Exists(path))
+            {
+                _allIcons = new List<MaterialIconInfo>(CommonIcons);
+                return;
+            }
+
+            var icons = new List<MaterialIconInfo>();
+            var lines = System.IO.File.ReadAllLines(path);
+            foreach (var line in lines)
+            {
+                var parts = line.Trim().Split(' ');
+                if (parts.Length < 2) continue;
+                var name = parts[0];
+                var codepoint = parts[1];
+                try
+                {
+                    var codeVal = System.Convert.ToInt32(codepoint, 16);
+                    var glyph = char.ConvertFromUtf32(codeVal);
+                    var displayName = string.Join(" ", name.Split('_')
+                        .Select(w => w.Length > 0 ? char.ToUpper(w[0]) + w.Substring(1) : w));
+                    icons.Add(new MaterialIconInfo { Name = name, Glyph = glyph, DisplayName = displayName });
+                }
+                catch { }
+            }
+
+            _allIcons = icons;
+        }
+        catch
+        {
+            _allIcons = new List<MaterialIconInfo>(CommonIcons);
+        }
+    }
 }

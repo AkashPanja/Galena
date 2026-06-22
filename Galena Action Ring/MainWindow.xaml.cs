@@ -50,6 +50,7 @@ namespace Galena_Action_Ring
         private readonly List<RingProfile> _appProfiles = new();
         private int _selectedProfileIndex;
         private bool _suppressTabChange;
+        private bool _suppressColorChange;
         private bool _suppressActionTypeChange;
 
         // Canvas sizing
@@ -91,6 +92,7 @@ namespace Galena_Action_Ring
             InitAppProfiles();
             LoadCurrentProfile();
 
+            PopulateAppList();
             _ = RefreshDeviceListAsync();
             StartPollTimer();
         }
@@ -872,6 +874,7 @@ namespace Galena_Action_Ring
 
             var node = _canvasNodes[_selectedCanvasIndex];
             node.ActionType = newType;
+            node.Category = GetCategoryForType(newType);
             node.ActionData = newType switch
             {
                 ActionType.LaunchApp => "",
@@ -938,6 +941,7 @@ namespace Galena_Action_Ring
                 Glyph = glyph,
                 Label = label,
                 ActionType = type,
+                Category = GetCategoryForType(type),
                 ActionData = type switch
                 {
                     ActionType.LaunchApp => "",
@@ -955,13 +959,30 @@ namespace Galena_Action_Ring
             ShowNodeProperties(newNode);
         }
 
+        private static ActionCategory GetCategoryForType(ActionType type) => type switch
+        {
+            ActionType.VolumeControl or ActionType.BrightnessControl => ActionCategory.Group,
+            ActionType.Folder => ActionCategory.Folder,
+            _ => ActionCategory.Individual
+        };
+
         #endregion
 
         #region Color & Icon Picker
 
         private void PopulateIconGallery()
         {
-            IconGallery.ItemsSource = MaterialIcons.CommonIcons;
+            IconGallery.ItemsSource = MaterialIcons.AllIcons;
+        }
+
+        private void IconSearchBox_TextChanged(object sender, TextChangedEventArgs e)
+        {
+            var search = IconSearchBox.Text?.Trim().ToLowerInvariant() ?? "";
+            IconGallery.ItemsSource = string.IsNullOrEmpty(search)
+                ? MaterialIcons.AllIcons
+                : MaterialIcons.AllIcons
+                    .Where(icon => icon.DisplayName.ToLowerInvariant().Contains(search) ||
+                                  icon.Name.ToLowerInvariant().Contains(search));
         }
 
         private void IconGallery_SelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -972,25 +993,6 @@ namespace Galena_Action_Ring
             node.Glyph = icon.Glyph;
             PropGlyphPreview.Glyph = icon.Glyph;
             RenderCanvas();
-        }
-
-        private static Color HslToColor(double hue, double saturation = 1.0, double lightness = 0.7)
-        {
-            hue = ((hue % 360) + 360) % 360;
-            var c = (1 - Math.Abs(2 * lightness - 1)) * saturation;
-            var x = c * (1 - Math.Abs((hue / 60) % 2 - 1));
-            var m = lightness - c / 2;
-            double r, g, b;
-            if (hue < 60) { r = c; g = x; b = 0; }
-            else if (hue < 120) { r = x; g = c; b = 0; }
-            else if (hue < 180) { r = 0; g = c; b = x; }
-            else if (hue < 240) { r = 0; g = x; b = c; }
-            else if (hue < 300) { r = x; g = 0; b = c; }
-            else { r = c; g = 0; b = x; }
-            return Color.FromArgb(255,
-                (byte)((r + m) * 255),
-                (byte)((g + m) * 255),
-                (byte)((b + m) * 255));
         }
 
         private static string ColorToHex(Color c)
@@ -1010,15 +1012,13 @@ namespace Galena_Action_Ring
                 (byte)((b + 255) / 2));
         }
 
-        private void PrimaryColorSlider_ValueChanged(object sender, Microsoft.UI.Xaml.Controls.Primitives.RangeBaseValueChangedEventArgs e)
+        private void PrimaryColorPicker_ColorChanged(ColorPicker sender, ColorChangedEventArgs args)
         {
-            if (_selectedProfileIndex < 0 || _selectedProfileIndex >= _appProfiles.Count) return;
+            if (_suppressColorChange || _selectedProfileIndex < 0 || _selectedProfileIndex >= _appProfiles.Count) return;
             var profile = _appProfiles[_selectedProfileIndex];
-            var hue = PrimaryColorSlider.Value;
-            var primary = HslToColor(hue);
+            var primary = args.NewColor;
             var secondary = ComplementaryColor(primary);
 
-            PrimaryPreview.Background = new SolidColorBrush(primary);
             SecondaryPreview.Background = new SolidColorBrush(secondary);
 
             profile.PrimaryColor = ColorToHex(primary);
@@ -1031,24 +1031,14 @@ namespace Galena_Action_Ring
         {
             if (_selectedProfileIndex < 0 || _selectedProfileIndex >= _appProfiles.Count) return;
             var profile = _appProfiles[_selectedProfileIndex];
+            _suppressColorChange = true;
             if (TryParseColor(profile.PrimaryColor, out var primary))
             {
-                var max = Math.Max(primary.R, Math.Max(primary.G, primary.B));
-                var min = Math.Min(primary.R, Math.Min(primary.G, primary.B));
-                double hue = 0;
-                if (max != min)
-                {
-                    var d = max - min;
-                    if (max == primary.R) hue = 60 * (((primary.G - primary.B) / d) % 6);
-                    else if (max == primary.G) hue = 60 * (((primary.B - primary.R) / d) + 2);
-                    else hue = 60 * (((primary.R - primary.G) / d) + 4);
-                }
-                if (hue < 0) hue += 360;
-                PrimaryColorSlider.Value = hue;
+                PrimaryColorPicker.Color = primary;
             }
-            PrimaryPreview.Background = new SolidColorBrush(primary);
             if (TryParseColor(profile.SecondaryColor, out var secondary))
                 SecondaryPreview.Background = new SolidColorBrush(secondary);
+            _suppressColorChange = false;
         }
 
         private static bool TryParseColor(string hex, out Color color)
@@ -1068,6 +1058,43 @@ namespace Galena_Action_Ring
             }
             catch { }
             return false;
+        }
+
+        private void PropAppList_SelectionChanged(object sender, SelectionChangedEventArgs e)
+        {
+            if (PropAppList.SelectedItem is not AppListItem app) return;
+            PropAppPathBox.Text = app.FullPath;
+            if (_selectedCanvasIndex >= 0 && _selectedCanvasIndex < _canvasNodes.Count)
+                _canvasNodes[_selectedCanvasIndex].ActionData = app.FullPath;
+        }
+
+        private void PopulateAppList()
+        {
+            var items = new List<AppListItem>();
+            var dirs = new[]
+            {
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonStartMenu),
+                Environment.GetFolderPath(Environment.SpecialFolder.StartMenu),
+                Environment.GetFolderPath(Environment.SpecialFolder.Programs),
+                Environment.GetFolderPath(Environment.SpecialFolder.CommonPrograms),
+            };
+
+            foreach (var dir in dirs)
+            {
+                if (!System.IO.Directory.Exists(dir)) continue;
+                try
+                {
+                    foreach (var lnk in System.IO.Directory.GetFiles(dir, "*.lnk", System.IO.SearchOption.AllDirectories))
+                    {
+                        var name = System.IO.Path.GetFileNameWithoutExtension(lnk);
+                        if (!string.IsNullOrWhiteSpace(name))
+                            items.Add(new AppListItem { DisplayName = name, FullPath = lnk });
+                    }
+                }
+                catch { }
+            }
+
+            PropAppList.ItemsSource = items.OrderBy(a => a.DisplayName).ToList();
         }
 
         #endregion
@@ -1122,6 +1149,12 @@ namespace Galena_Action_Ring
     }
 
     public enum DeviceType { Usb, Bluetooth, Unknown }
+
+    public class AppListItem
+    {
+        public string DisplayName { get; set; } = "";
+        public string FullPath { get; set; } = "";
+    }
 
     public class DeviceItem : INotifyPropertyChanged
     {
