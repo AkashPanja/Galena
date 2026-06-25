@@ -23,7 +23,7 @@ Build out the Galena Action Ring WinUI 3 app with radial groups, Material Symbol
 - Corrupted profiles auto-repaired on load
 - ActionType dropdown uses grouped categories with thin separator lines and per-type Material Symbols icons; uses single `ItemTemplate` with `BoolToVisibilityConverter` instead of `DataTemplateSelector`
 - Converters must be registered in code-behind (not XAML `StaticResource`) to avoid XAML compiler resolution failures
-- Startup: **Unpackaged profile → Task Scheduler** (with explicit `WorkingDirectory`); **Packaged profile → `StartupTask` API** (broken at login — COM `0x80040154` crash in `DeploymentInitializeOptions`); first-run ContentDialog asking to enable, Settings page toggle to manage; silent background launch via `--startup` flag
+- Startup: **Unpackaged profile → Task Scheduler** (with explicit `WorkingDirectory`); **Packaged profile → Registry `Run` key** (`HKCU\...\Run`); first-run ContentDialog asking to enable, Settings page toggle to manage; silent background launch via `--startup` flag
 - Configure icon: handyman (`\uF10B`); Settings icon: gear (`\uE8B8`)
 - **Registry for settings** when unpackaged — `ApplicationData.Current.LocalSettings` requires package identity (fails in unpackaged)
 
@@ -80,7 +80,7 @@ Build out the Galena Action Ring WinUI 3 app with radial groups, Material Symbol
 - `ApplicationData.Current` replaced with `App.GetSetting/SetSetting` using `HKCU\Software\GalenaActionRing` Registry
 
 ### In Progress / Blocked
-- **Packaged profile `StartupTask` does not launch app at login** — Event Log shows `TypeInitializationException` → `COMException (0x80040154)` for `DeploymentInitializeOptions` WinRT class, crash happens before any managed code runs. Unpackaged profile + Task Scheduler is the working workaround.
+- None
 
 ## Key Decisions
 - **Module initializer approach for bootstrap** — `[ModuleInitializer]` in `BootstrapInitializer.cs` calls `MddBootstrapInitialize2` before `Main()` runs, which means WinUI WinRT types are registered by the time `Application.Start()` tries to activate `IApplicationStatics`. This is the only way to fix the unpackaged crash since `Application.Start()` (called in the generated `Main`) requires framework package types to be registered.
@@ -97,7 +97,7 @@ Build out the Galena Action Ring WinUI 3 app with radial groups, Material Symbol
 - Icon gallery hidden for toggle nodes (Mute, Play/Pause) since glyph is runtime-determined and manual changes would be overwritten
 - Collapsible colors section: height-animated via `Storyboard`+`DoubleAnimation` with `EnableDependentAnimation=True`; `CollapseColors()` instant when called from `ShowNodeProperties`, animated when manually toggled
 - New rings always cloned from `CreateDefault()` template
-- **Startup mechanism split by profile**: Packaged → `StartupTask` API (broken at login — `0x80040154` COM crash); Unpackaged → Task Scheduler with `WorkingDirectory` + `--startup` flag (verified working). User should use **Unpackaged profile** in VS for startup to work.
+- **Startup mechanism split by profile**: Packaged → Registry `Run` key (`HKCU\...\Run`); Unpackaged → Task Scheduler with `WorkingDirectory` + `--startup` flag (verified working). Both are robust.
 - Task Scheduler used for unpackaged startup (over Registry Run key or Startup folder) because only it can set `WorkingDirectory` before native code runs — fixes CWD defaulting to `System32` which breaks WinAppSDK bootstrapper
 - **Registry for settings** instead of `ApplicationData.Current.LocalSettings` — works in both packaged and unpackaged, no package identity required
 
@@ -116,20 +116,20 @@ Build out the Galena Action Ring WinUI 3 app with radial groups, Material Symbol
 - All FontIcons using Material Symbols must set `FontFamily="Assets/MaterialSymbols.ttf#Material Symbols Outlined"` or they render as rectangles
 - Converters that are referenced in DataTemplates must be registered in code-behind (e.g. `AppRoot.Resources["BoolToVis"] = new BoolToVisibilityConverter()`) — XAML `StaticResource` fails for local types inside DataTemplates
 - `Grid` does NOT clip children in WinUI 3 → elements can overflow into adjacent cells
-- **Packaged `StartupTask` crash at login**: `TypeInitializationException` → `COMException (0x80040154)` — `WinRT.ActivationFactory.Get("Microsoft.Windows.ApplicationModel.WindowsAppRuntime.DeploymentInitializeOptions")` fails with "Class not registered". This is a WinAppSDK 2.2 issue with packaged startup activation. App works fine when launched from VS F5 or unpackaged EXE.
+- **Packaged startup**: Uses Registry `Run` key (`HKCU\Software\Microsoft\Windows\CurrentVersion\Run`) instead of `StartupTask` API — avoids WinAppSDK 2.2 `0x80040154` crash at login. The `Registry.Run` key launches the app in a normal user-session context where WinRT classes are already registered. See `GetProcessPath()` in `StartupService.cs` for how the packaged exe path is resolved via `Package.Current.InstalledLocation.Path`.
 - **Unpackaged launch now working** — module initializer in `BootstrapInitializer.cs` calls `MddBootstrapInitialize2(0x00020002, "", 0)` before `Application.Start()` via `[ModuleInitializer]`
 - **`ApplicationData.Current` throws `InvalidOperationException (0x80073D54)`** in unpackaged mode (no package identity) — replaced all 6 call sites in `MainWindow.xaml.cs` with `App.GetSetting/SetSetting` using `HKCU\Software\GalenaActionRing`
 - **Error codes**: `0xE0434352` = unhandled managed exception; `0xC000027B` = `STATUS_STACK_BUFFER_OVERRUN` (CRT invalid parameter, from stale native host EXE); `0x80040154` = `REGDB_E_CLASSNOTREG` (WinRT type not registered)
 - **Framework package**: `Microsoft.WindowsAppRuntime.2` version `2.2.0.0` at `C:\Program Files\WindowsApps\Microsoft.WindowsAppRuntime.2_2.2.0.0_x64__8wekyb3d8bbwe`
 - **WinAppSDK Foundation 2.1.0** auto-initializer flow: `WindowsAppRuntimeAutoInitializer.cs` (module initializer) → `DeploymentManagerAutoInitializer.cs` → `DeploymentInitializeOptions` WinRT activation → fails `0x80040154` if bootstrapper not called first. **Disabled** via `<WindowsAppSdkDeploymentManagerInitialize>false</WindowsAppSdkDeploymentManagerInitialize>`
 - **Diagnostic log location**: Packaged → `%LOCALAPPDATA%\Packages\088fc4aa-...\LocalCache\Local\GalenaActionRing\startup.log`; Unpackaged → `%LOCALAPPDATA%\GalenaActionRing\startup.log`
-- `StartupTask.RequestEnableAsync()` returns `Enabled` successfully but Windows never actually activates the app at login due to the COM crash above
+- `StartupTask` is no longer used for packaged startup. `IsEnabled()` checks the Registry `Run` key. Migration from old `StartupTask` happens automatically in `IsEnabled()` (disables old task) and `CleanupOldArtifacts()` (defensive cleanup on every toggle).
 - First-run sentinel: `HKCU\Software\GalenaActionRing\FirstRunDone` (DWORD 1)
 
 ## Relevant Files
 - `Services/BootstrapInitializer.cs`: `[ModuleInitializer]` calls `MddBootstrapInitialize2` before `Main()`, enabling unpackaged WinRT activation
 - `Services/AudioVolumeControl.cs`: COM interop for `IAudioEndpointVolume` with GetMute/SetMute
-- `Services/StartupService.cs`: dual-mode startup management — `StartupTask` for packaged, `UnpackagedStartupManager` for unpackaged; diagnostic logging to `startup.log`
+- `Services/StartupService.cs`: dual-mode startup management — Registry `Run` key for packaged, `UnpackagedStartupManager` for unpackaged; diagnostic logging to `startup.log`
 - `Services/UnpackagedStartupManager.cs`: wraps `TaskScheduler` library (`TaskService`) — `LogonTrigger`, `ExecAction` with `--startup` arg and explicit `WorkingDirectory`; logging to `startup.log`
 - `Models/RingNode.cs`: ActionType, ActionCategory, Category property, DeepCopy
 - `Models/RingProfile.cs`: DeepCopy, PrimaryColor/SecondaryColor
@@ -142,7 +142,7 @@ Build out the Galena Action Ring WinUI 3 app with radial groups, Material Symbol
 - `OsdWindow.xaml.cs`: `ShowSeekIndicator()` with persistent storyboard (one-time create, `Completed` resets flag, direction change = stop+restart from opposite start), `StopSeekLoop()`, `ShowSubMenuBg()`/`HideSubMenuBg()`, `ApplyProfileColors` sets `SubMenuBgEllipse.Fill` radial gradient from primary, `_seekAnimX`/`_seekFade` fields, `_seekLoopInitialized`/`_seekLoopActive`, subtitle glyphs `\uE037`/`\uE034`/`\uEF6A` in `UpdateMediaPlayPauseIcon`
 - `MainWindow.xaml`: collapsible Ring Colors section, grouped ActionType ComboBox, IconSection named container, `NavSettings` with gear icon `\uE8B8`, `NavConfigure` icon changed to handyman `\uF10B`, `SettingsPage` grid with `StartupToggle` ToggleSwitch
 - `MainWindow.xaml.cs`: `PopulateActionTypeBox()` with grouped list, `ShowNodeProperties` hides IconSection for toggle types, `CollapseColors`/`ExpandColors`, `SyncCanvasColors`, `NavView_ItemInvoked` handles Settings tag + loads `StartupService.IsEnabled()`, `StartupToggle_Toggled` calls `StartupService.SetEnabledAsync()`, `ShowFirstRunPromptAsync()` ContentDialog on first run, `ResetAppButton_Click` with confirmation dialog; all `ApplicationData.Current.LocalSettings.Values[...]` replaced with `App.GetSetting/SetSetting`
-- `Package.appxmanifest`: `desktop:StartupTask` with `DisplayName="Galena Action Ring"`, `EntryPoint="Windows.FullTrustApplication"`, `desktop:` namespace
+- `Package.appxmanifest`: No startup extensions — `StartupTask` declaration removed; `runFullTrust` capability retained for COM/System access
 - `Galena Action Ring.csproj`: added `TaskScheduler` NuGet v2.12.2; added `<WindowsAppSdkDeploymentManagerInitialize>false</WindowsAppSdkDeploymentManagerInitialize>` (prevents WinAppSDK module initializer that crashes unpackaged)
 - `Properties/launchSettings.json`: two profiles — `"Galena Action Ring (Package)"` (MsixPackage) and `"Galena Action Ring (Unpackaged)"` (Project)
 - `App.xaml.cs`: silent startup detection via `--startup` CLI arg; `Environment.CurrentDirectory = AppDomain.CurrentDomain.BaseDirectory`; `App.GetSetting/SetSetting` helpers using `HKCU\Software\GalenaActionRing` Registry; P/Invokes moved to `BootstrapInitializer.cs`

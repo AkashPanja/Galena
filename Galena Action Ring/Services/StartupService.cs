@@ -43,15 +43,29 @@ public static class StartupService
         {
             try
             {
-                var task = StartupTask.GetAsync("GalenaActionRing").GetAwaiter().GetResult();
-                Log($"  StartupTask.State={task.State}");
-                return task.State == StartupTaskState.Enabled ||
-                       task.State == StartupTaskState.EnabledByPolicy;
+                using var key = Registry.CurrentUser.OpenSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Run", false);
+                var exists = key?.GetValue("GalenaActionRing") != null;
+                Log($"  Registry.Run key exists={exists}");
+
+                try
+                {
+                    var task = StartupTask.GetAsync("GalenaActionRing").GetAwaiter().GetResult();
+                    if (task.State == StartupTaskState.Enabled ||
+                        task.State == StartupTaskState.EnabledByPolicy)
+                    {
+                        Log("  Migrating from old StartupTask to Registry Run key");
+                        task.Disable();
+                    }
+                }
+                catch { }
+
+                return exists;
             }
             catch (Exception ex)
             {
-                Log($"  StartupTask error: {ex.Message}");
-                return UnpackagedStartupManager.IsStartupEnabled();
+                Log($"  Registry check error: {ex.Message}");
+                return false;
             }
         }
         var enabled = UnpackagedStartupManager.IsStartupEnabled();
@@ -59,7 +73,7 @@ public static class StartupService
         return enabled;
     }
 
-    public static async Task SetEnabledAsync(bool enable)
+    public static Task SetEnabledAsync(bool enable)
     {
         Log($"SetEnabledAsync({enable}) — IsPackaged={IsPackaged}");
         try
@@ -68,17 +82,17 @@ public static class StartupService
 
             if (IsPackaged)
             {
-                var task = await StartupTask.GetAsync("GalenaActionRing");
+                using var key = Registry.CurrentUser.OpenSubKey(
+                    @"Software\Microsoft\Windows\CurrentVersion\Run", true);
                 if (enable)
                 {
-                    var result = await task.RequestEnableAsync();
-                    Log($"  RequestEnableAsync() returned: {result}");
-                    Log($"  NOTE: If app doesn't start at login, switch VS profile to 'Galena Action Ring (Unpackaged)' and retry");
+                    key?.SetValue("GalenaActionRing", $"\"{GetProcessPath()}\" --startup");
+                    Log("  Registry Run key written");
                 }
                 else
                 {
-                    task.Disable();
-                    Log("  Disable() called");
+                    key?.DeleteValue("GalenaActionRing", false);
+                    Log("  Registry Run key deleted");
                 }
             }
             else
@@ -91,6 +105,17 @@ public static class StartupService
         {
             Log($"  ERROR: {ex.GetType().Name}: {ex.Message}");
         }
+        return Task.CompletedTask;
+    }
+
+    private static string GetProcessPath()
+    {
+        if (IsPackaged)
+        {
+            var pkgPath = Package.Current.InstalledLocation.Path;
+            return Path.Combine(pkgPath, "Galena Action Ring.exe");
+        }
+        return Environment.ProcessPath ?? "";
     }
 
     private static void CleanupOldArtifacts()
@@ -113,6 +138,16 @@ public static class StartupService
             k?.DeleteValue("GalenaActionRingStartupTask", false);
         }
         catch { }
+        if (IsPackaged)
+        {
+            try
+            {
+                var task = StartupTask.GetAsync("GalenaActionRing").GetAwaiter().GetResult();
+                task.Disable();
+                Log("  Old StartupTask disabled");
+            }
+            catch { }
+        }
     }
 
     public static bool IsFirstRunDone()
