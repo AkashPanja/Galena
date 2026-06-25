@@ -14,4 +14,17 @@ public class RingProfile
 
     [JsonIgnore]
     public int NodeCount => Nodes.Count;
+
+    public RingProfile DeepCopy()
+    {
+        return new RingProfile
+        {
+            Name = Name,
+            ProcessName = ProcessName,
+            Radius = Radius,
+            Nodes = Nodes.ConvertAll(n => n.DeepCopy()),
+            PrimaryColor = PrimaryColor,
+            SecondaryColor = SecondaryColor,
+        };
+    }
 }

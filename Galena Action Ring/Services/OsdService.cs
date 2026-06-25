@@ -3,8 +3,11 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+
 using System.Management;
 using System.Runtime.InteropServices;
+using System.Threading.Tasks;
+using Windows.Media.Control;
 
 namespace Galena_Action_Ring;
 
@@ -47,6 +50,7 @@ public class OsdService
         _osdWindow = new OsdWindow();
         _osdWindow.ApplyProfileColors(CurrentProfile.PrimaryColor, CurrentProfile.SecondaryColor);
         _osdWindow.LoadNodes(CurrentProfile.Nodes, CurrentProfile.Radius);
+        InitPlayPauseIcons();
         ApplyToggleStatesToOsd();
         NativeMethods.SetWindowSize(_osdWindow);
         NativeMethods.SetWindowPosition(_osdWindow);
@@ -63,6 +67,7 @@ public class OsdService
         CurrentProfile = ProfileService.LoadProfile(profileName) ?? ProfileService.CreateDefault();
         _osdWindow.ApplyProfileColors(CurrentProfile.PrimaryColor, CurrentProfile.SecondaryColor);
         _osdWindow.LoadNodes(CurrentProfile.Nodes, CurrentProfile.Radius);
+        InitPlayPauseIcons();
         ApplyToggleStatesToOsd();
     }
 
@@ -70,7 +75,7 @@ public class OsdService
     {
         if (_osdWindow == null) return;
         _inRadialMode = false;
-        _seekMode = false;
+        if (_seekMode) { _seekMode = false; _osdWindow?.StopSeekLoop(); }
         NativeMethods.ShowTopmost(_osdWindow);
         _isVisible = true;
         _selectedIndex = 0;
@@ -83,7 +88,8 @@ public class OsdService
     {
         if (_osdWindow == null || !_isVisible) return;
         if (_inRadialMode) ExitRadialMode(false);
-        _seekMode = false;
+        if (_seekMode) { _seekMode = false; _osdWindow?.StopSeekLoop(); }
+        _osdWindow?.HideSubMenuBg();
         _isVisible = false;
         _timeoutTimer?.Stop();
         _osdWindow.HideMenu(() =>
@@ -95,7 +101,7 @@ public class OsdService
     public void SelectNext()
     {
         if (!_isVisible) return;
-        if (_seekMode) { keybd_event(0xB2, 0, 0, 0); keybd_event(0xB2, 0, 2, 0); ResetTimeout(); return; }
+        if (_seekMode) { _ = SeekMediaAsync(true); _osdWindow?.ShowSeekIndicator(true); ResetTimeout(); return; }
         if (_inRadialMode) { UpdateRadialValue(1); return; }
         var maxIndex = CurrentProfile.NodeCount;
         _selectedIndex = (_selectedIndex + 1) % (maxIndex + 1);
@@ -106,7 +112,7 @@ public class OsdService
     public void SelectPrev()
     {
         if (!_isVisible) return;
-        if (_seekMode) { keybd_event(0xB4, 0, 0, 0); keybd_event(0xB4, 0, 2, 0); ResetTimeout(); return; }
+        if (_seekMode) { _ = SeekMediaAsync(false); _osdWindow?.ShowSeekIndicator(false); ResetTimeout(); return; }
         if (_inRadialMode) { UpdateRadialValue(-1); return; }
         var maxIndex = CurrentProfile.NodeCount;
         _selectedIndex = (_selectedIndex + maxIndex) % (maxIndex + 1);
@@ -122,9 +128,12 @@ public class OsdService
             {
                 CurrentProfile.Nodes = _parentNodes ?? CurrentProfile.Nodes;
                 _osdWindow?.LoadNodes(CurrentProfile.Nodes, CurrentProfile.Radius);
+                InitPlayPauseIcons();
                 _previousFolderNode = null;
                 _parentNodes = null;
                 _osdWindow?.SetCenterGlyph("\uE5CD");
+                _osdWindow?.HideSubMenuBg();
+                ApplyToggleStatesToOsd();
             }
             Show();
             return;
@@ -133,6 +142,7 @@ public class OsdService
         if (_seekMode)
         {
             _seekMode = false;
+            _osdWindow?.StopSeekLoop();
             return;
         }
 
@@ -171,85 +181,91 @@ public class OsdService
         ResetTimeout();
     }
 
-    private void ExecuteAction(RingNode node, int nodeIndex = -1)
+    private async void ExecuteAction(RingNode node, int nodeIndex = -1)
     {
-        switch (node.ActionType)
+        try
         {
-            case ActionType.LaunchApp:
-                if (!string.IsNullOrEmpty(node.ActionData))
-                    Process.Start(new ProcessStartInfo(node.ActionData) { UseShellExecute = true });
-                break;
+            switch (node.ActionType)
+            {
+                case ActionType.LaunchApp:
+                case ActionType.OpenUrl:
+                    if (!string.IsNullOrEmpty(node.ActionData))
+                        Process.Start(new ProcessStartInfo(node.ActionData) { UseShellExecute = true });
+                    break;
 
-            case ActionType.OpenUrl:
-                if (!string.IsNullOrEmpty(node.ActionData))
-                    Process.Start(new ProcessStartInfo(node.ActionData) { UseShellExecute = true });
-                break;
+                case ActionType.VolumeUp:
+                    keybd_event(0xAF, 0, 0, 0);
+                    keybd_event(0xAF, 0, 2, 0);
+                    break;
 
-            case ActionType.VolumeUp:
-                keybd_event(0xAF, 0, 0, 0);
-                keybd_event(0xAF, 0, 2, 0);
-                break;
+                case ActionType.VolumeDown:
+                    keybd_event(0xAE, 0, 0, 0);
+                    keybd_event(0xAE, 0, 2, 0);
+                    break;
 
-            case ActionType.VolumeDown:
-                keybd_event(0xAE, 0, 0, 0);
-                keybd_event(0xAE, 0, 2, 0);
-                break;
+                case ActionType.MuteToggle:
+                    AudioVolumeControl.SetMute(!AudioVolumeControl.GetMute());
+                    UpdateToggleIcon(nodeIndex, node);
+                    break;
 
-            case ActionType.MuteToggle:
-                keybd_event(0xAD, 0, 0, 0);
-                keybd_event(0xAD, 0, 2, 0);
-                ToggleNodeState(nodeIndex);
-                break;
+                case ActionType.BrightnessUp:
+                case ActionType.BrightnessDown:
+                    SetBrightness(node.ActionType == ActionType.BrightnessUp);
+                    break;
 
-            case ActionType.BrightnessUp:
-            case ActionType.BrightnessDown:
-                SetBrightness(node.ActionType == ActionType.BrightnessUp);
-                break;
+                case ActionType.MediaPlayPause:
+                    var playStatus = await GetMediaStatusAsync();
+                    if (playStatus != null)
+                    {
+                        keybd_event(0xB3, 0, 0, 0);
+                        keybd_event(0xB3, 0, 2, 0);
+                        // Toggle icon predictively — media app hasn't processed the key yet
+                        var nextGlyph = playStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
+                            ? "\uE037" : "\uE034";
+                        _osdWindow?.UpdateNodeIcon(nodeIndex, nextGlyph);
+                    }
+                    break;
 
-            case ActionType.MediaPlayPause:
-                keybd_event(0xB3, 0, 0, 0);
-                keybd_event(0xB3, 0, 2, 0);
-                ToggleNodeState(nodeIndex);
-                break;
+                case ActionType.MediaNext:
+                    keybd_event(0xB0, 0, 0, 0);
+                    keybd_event(0xB0, 0, 2, 0);
+                    break;
 
-            case ActionType.MediaNext:
-                keybd_event(0xB0, 0, 0, 0);
-                keybd_event(0xB0, 0, 2, 0);
-                break;
+                case ActionType.MediaPrevious:
+                    keybd_event(0xB1, 0, 0, 0);
+                    keybd_event(0xB1, 0, 2, 0);
+                    break;
 
-            case ActionType.MediaPrevious:
-                keybd_event(0xB1, 0, 0, 0);
-                keybd_event(0xB1, 0, 2, 0);
-                break;
+                case ActionType.MediaSeekForward:
+                case ActionType.MediaSeekBackward:
+                    _seekMode = true;
+                    break;
 
-            case ActionType.MediaSeekForward:
-            case ActionType.MediaSeekBackward:
-                _seekMode = true;
-                break;
+                case ActionType.ToggleNightLight:
+                    Process.Start(new ProcessStartInfo("ms-settings:nightlight") { UseShellExecute = true });
+                    break;
 
-            case ActionType.ToggleNightLight:
-                Process.Start(new ProcessStartInfo("ms-settings:nightlight") { UseShellExecute = true });
-                break;
+                case ActionType.Folder:
+                    if (node.Children != null && node.Children.Count > 0)
+                        EnterSubMenu(node);
+                    break;
 
-            case ActionType.Folder:
-                if (node.Children != null && node.Children.Count > 0)
-                    EnterSubMenu(node);
-                break;
-
-            case ActionType.TextExpansion:
-                if (!string.IsNullOrEmpty(node.ActionData))
-                {
-                    Windows.ApplicationModel.DataTransfer.DataPackage dp = new();
-                    dp.SetText(node.ActionData);
-                    Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dp);
-                    // Simulate Ctrl+V
-                    keybd_event(0x11, 0, 0, 0);
-                    keybd_event(0x56, 0, 0, 0);
-                    keybd_event(0x56, 0, 2, 0);
-                    keybd_event(0x11, 0, 2, 0);
-                }
-                break;
+                case ActionType.TextExpansion:
+                    if (!string.IsNullOrEmpty(node.ActionData))
+                    {
+                        Windows.ApplicationModel.DataTransfer.DataPackage dp = new();
+                        dp.SetText(node.ActionData);
+                        Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dp);
+                        // Simulate Ctrl+V
+                        keybd_event(0x11, 0, 0, 0);
+                        keybd_event(0x56, 0, 0, 0);
+                        keybd_event(0x56, 0, 2, 0);
+                        keybd_event(0x11, 0, 2, 0);
+                    }
+                    break;
+            }
         }
+        catch { }
     }
 
     private void EnterSubMenu(RingNode folderNode)
@@ -261,7 +277,10 @@ public class OsdService
         Hide();
         CurrentProfile.Nodes = folderNode.Children!;
         _osdWindow?.LoadNodes(CurrentProfile.Nodes, CurrentProfile.Radius);
+        InitPlayPauseIcons();
         _osdWindow?.SetCenterGlyph("\uE5C4");
+        _osdWindow?.ShowSubMenuBg();
+        ApplyToggleStatesToOsd();
         Show();
     }
 
@@ -275,7 +294,10 @@ public class OsdService
 
         Hide();
         _osdWindow?.LoadNodes(CurrentProfile.Nodes, CurrentProfile.Radius);
+        InitPlayPauseIcons();
         _osdWindow?.SetCenterGlyph("\uE5CD");
+        _osdWindow?.HideSubMenuBg();
+        ApplyToggleStatesToOsd();
         Show();
     }
 
@@ -398,38 +420,120 @@ public class OsdService
         _timeoutTimer?.Start();
     }
 
-    private void ApplyToggleStatesToOsd()
+    private void InitPlayPauseIcons()
+    {
+        if (_osdWindow == null) return;
+        for (int i = 0; i < CurrentProfile.Nodes.Count; i++)
+        {
+            if (CurrentProfile.Nodes[i].ActionType == ActionType.MediaPlayPause)
+                _osdWindow.UpdateNodeIcon(i, "\uEF6A");
+        }
+    }
+
+    private static async Task<GlobalSystemMediaTransportControlsSessionPlaybackStatus?> GetMediaStatusAsync()
+    {
+        try
+        {
+            var manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+            var session = manager.GetCurrentSession();
+            if (session == null) return null;
+            var info = session.GetPlaybackInfo();
+            return info?.PlaybackStatus;
+        }
+        catch { return null; }
+    }
+
+    private async void ApplyToggleStatesToOsd()
     {
         if (_osdWindow == null) return;
         for (int i = 0; i < CurrentProfile.Nodes.Count; i++)
         {
             var node = CurrentProfile.Nodes[i];
             var key = $"{CurrentProfile.Name}:{i}";
-            if (_toggleStates.TryGetValue(key, out var isOn) && isOn)
+            if (node.ActionType == ActionType.MuteToggle)
             {
-                var onGlyph = node.ActionType == ActionType.MuteToggle ? "\uE04F" : "\uE034";
+                var muted = AudioVolumeControl.GetMute();
+                _toggleStates[key] = muted;
+                var glyph = muted ? "\uE04F" : "\uE050";
+                _osdWindow.UpdateNodeIcon(i, glyph);
+            }
+            else if (node.ActionType == ActionType.MediaPlayPause)
+            {
+                var status = await GetMediaStatusAsync();
+                string glyph;
+                if (status == null)
+                    glyph = "\uEF6A";
+                else if (status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
+                    glyph = "\uE034";
+                else
+                    glyph = "\uE037";
+                _osdWindow.UpdateNodeIcon(i, glyph);
+            }
+            else if (_toggleStates.TryGetValue(key, out var isOn) && isOn)
+            {
+                var onGlyph = "\uE034";
                 _osdWindow.UpdateNodeIcon(i, onGlyph);
             }
         }
     }
 
-    private void ToggleNodeState(int nodeIndex)
+    private async void UpdateMediaPlayPauseIcon(int nodeIndex)
+    {
+        var status = await GetMediaStatusAsync();
+        string glyph;
+        if (status == null)
+            glyph = "\uEF6A";
+        else if (status == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing)
+            glyph = "\uE034";
+        else
+            glyph = "\uE037";
+        _osdWindow?.UpdateNodeIcon(nodeIndex, glyph);
+    }
+
+    private void UpdateToggleIcon(int nodeIndex, RingNode node)
     {
         if (nodeIndex < 0 || nodeIndex >= CurrentProfile.Nodes.Count) return;
-        var node = CurrentProfile.Nodes[nodeIndex];
         var key = $"{CurrentProfile.Name}:{nodeIndex}";
-        var isOn = _toggleStates.GetValueOrDefault(key);
-        _toggleStates[key] = !isOn;
-
-        // Update OSD icon to reflect toggle state
-        var onGlyph = node.ActionType == ActionType.MuteToggle ? "\uE04F" : "\uE034";
-        var offGlyph = node.ActionType == ActionType.MuteToggle ? "\uE04E" : "\uE037";
-        var glyph = !isOn ? onGlyph : offGlyph;
-        _osdWindow?.UpdateNodeIcon(nodeIndex, glyph);
+        if (node.ActionType == ActionType.MuteToggle)
+        {
+            var muted = AudioVolumeControl.GetMute();
+            _toggleStates[key] = muted;
+            var glyph = muted ? "\uE04F" : "\uE050";
+            _osdWindow?.UpdateNodeIcon(nodeIndex, glyph);
+        }
+        else if (node.ActionType == ActionType.MediaPlayPause)
+        {
+            UpdateMediaPlayPauseIcon(nodeIndex);
+        }
+        else
+        {
+            var isOn = _toggleStates.GetValueOrDefault(key);
+            _toggleStates[key] = !isOn;
+            var glyph = !isOn ? "\uE034" : "\uE037";
+            _osdWindow?.UpdateNodeIcon(nodeIndex, glyph);
+        }
     }
 
     [DllImport("user32.dll")]
     private static extern void keybd_event(byte bVk, byte bScan, uint dwFlags, UIntPtr dwExtraInfo);
 
     private const uint KEYEVENTF_KEYUP = 2;
+
+    private static async Task SeekMediaAsync(bool forward)
+    {
+        try
+        {
+            var manager = await GlobalSystemMediaTransportControlsSessionManager.RequestAsync();
+            var session = manager.GetCurrentSession();
+            if (session == null) return;
+            var timeline = session.GetTimelineProperties();
+            if (timeline == null) return;
+            var delta = TimeSpan.FromSeconds(5);
+            var newPos = forward
+                ? (timeline.Position + delta > timeline.EndTime ? timeline.EndTime : timeline.Position + delta)
+                : (timeline.Position - delta < TimeSpan.Zero ? TimeSpan.Zero : timeline.Position - delta);
+            await session.TryChangePlaybackPositionAsync(newPos.Ticks);
+        }
+        catch { }
+    }
 }

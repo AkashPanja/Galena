@@ -37,7 +37,7 @@ public enum ActionCategory
 
 public class RingNode : INotifyPropertyChanged
 {
-    private string _glyph = "\uE774";
+    private string _glyph = "\uE8B8";
     private string _label = "Action";
     private ActionType _actionType = ActionType.None;
     private string _actionData = "";
@@ -75,6 +75,20 @@ public class RingNode : INotifyPropertyChanged
 
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public List<RingNode>? Children { get; set; }
+
+    public RingNode DeepCopy()
+    {
+        var copy = new RingNode
+        {
+            Glyph = _glyph,
+            Label = _label,
+            ActionType = _actionType,
+            ActionData = _actionData,
+            Category = _category,
+            Children = Children?.ConvertAll(c => c.DeepCopy()),
+        };
+        return copy;
+    }
 
     public event PropertyChangedEventHandler? PropertyChanged;
     private void OnPropertyChanged([CallerMemberName] string? name = null) =>

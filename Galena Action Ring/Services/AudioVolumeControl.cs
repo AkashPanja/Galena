@@ -57,6 +57,30 @@ public static class AudioVolumeControl
         catch { }
     }
 
+    public static bool GetMute()
+    {
+        EnsureInitialized();
+        if (_endpointVolume == null) return false;
+        try
+        {
+            int hr = _endpointVolume.GetMute(out int mute);
+            if (hr < 0) return false;
+            return mute != 0;
+        }
+        catch { return false; }
+    }
+
+    public static void SetMute(bool mute)
+    {
+        EnsureInitialized();
+        if (_endpointVolume == null) return;
+        try
+        {
+            _endpointVolume.SetMute(mute ? 1 : 0, IntPtr.Zero);
+        }
+        catch { }
+    }
+
     public static void Cleanup()
     {
         if (_endpointVolume != null)

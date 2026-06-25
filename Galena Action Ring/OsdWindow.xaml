@@ -7,6 +7,21 @@
         <!-- Main ring options -->
         <Grid x:Name="OptionsContainer" HorizontalAlignment="Center" VerticalAlignment="Center" />
 
+        <!-- Sub-menu background (radial gradient behind sub-menu nodes) -->
+        <Grid x:Name="SubMenuBgLayer" Visibility="Collapsed"
+              HorizontalAlignment="Center" VerticalAlignment="Center" IsHitTestVisible="False">
+            <Ellipse x:Name="SubMenuBgEllipse" Width="160" Height="160" />
+        </Grid>
+        <!-- Seek indicator -->
+        <FontIcon x:Name="SeekIndicator" FontFamily="Assets/MaterialSymbols.ttf#Material Symbols Outlined"
+                  Glyph="&#xEAC9;" Foreground="White" FontSize="28"
+                  HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0"
+                  RenderTransformOrigin="0.5,0.5">
+            <FontIcon.RenderTransform>
+                <CompositeTransform x:Name="SeekIndicatorTransform" TranslateX="0" />
+            </FontIcon.RenderTransform>
+        </FontIcon>
+
         <!-- Center button -->
         <Grid x:Name="CenterButton" HorizontalAlignment="Center" VerticalAlignment="Center" Opacity="0"
               RenderTransformOrigin="0.5,0.5">

@@ -10,6 +10,20 @@
     </Window.SystemBackdrop>
 
     <Grid x:Name="AppRoot">
+        <Grid.Resources>
+            <DataTemplate x:Key="ActionTypeItemTemplate">
+                <Grid>
+                    <Border Height="1" Background="{ThemeResource DividerStrokeColorDefault}" Margin="4,4,4,2"
+                            Visibility="{Binding IsSeparator, Converter={StaticResource BoolToVis}}" />
+                    <StackPanel Orientation="Horizontal" Spacing="8" Padding="4,2"
+                                Visibility="{Binding IsSeparator, Converter={StaticResource InverseBoolToVis}}">
+                        <FontIcon FontFamily="Assets/MaterialSymbols.ttf#Material Symbols Outlined"
+                                  Glyph="{Binding Glyph}" FontSize="14" />
+                        <TextBlock Text="{Binding Name}" VerticalAlignment="Center" FontSize="12" />
+                    </StackPanel>
+                </Grid>
+            </DataTemplate>
+        </Grid.Resources>
         <Grid.RowDefinitions>
             <RowDefinition Height="48" />
             <RowDefinition Height="*" />
@@ -84,6 +98,12 @@
                 </NavigationViewItem>
 
                 <NavigationViewItem x:Name="NavConfigure" Tag="Configure" Content="Configure">
+                    <NavigationViewItem.Icon>
+                        <FontIcon FontFamily="Assets/MaterialSymbols.ttf#Material Symbols Outlined" Glyph="&#xF10B;" />
+                    </NavigationViewItem.Icon>
+                </NavigationViewItem>
+
+                <NavigationViewItem x:Name="NavSettings" Tag="Settings" Content="Settings">
                     <NavigationViewItem.Icon>
                         <FontIcon FontFamily="Assets/MaterialSymbols.ttf#Material Symbols Outlined" Glyph="&#xE8B8;" />
                     </NavigationViewItem.Icon>
@@ -211,139 +231,196 @@
 
                                 <!-- RIGHT: Node Editor -->
                                 <Grid Grid.Column="1">
-                                    <!-- Default message when no node is selected -->
-                                    <TextBlock x:Name="NodeEditDefaultText"
-                                               Text="Click on a node to edit"
-                                               VerticalAlignment="Top" HorizontalAlignment="Center"
-                                               FontSize="14" Margin="0,40,0,0"
-                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}"
-                                               Visibility="Visible" />
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="*" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
 
-                                    <!-- Node edit panel (visible when a node is selected) -->
-                                    <ScrollViewer x:Name="NodeEditPanel" Visibility="Collapsed"
-                                                  VerticalScrollBarVisibility="Auto" Padding="16,0,16,16">
-                                        <StackPanel Spacing="12">
-                                            <!-- Icon + Name preview -->
-                                            <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,16,0,0">
-                                                <Border x:Name="PropNodePreview"
-                                                        Width="48" Height="48" CornerRadius="24"
-                                                        Background="{StaticResource NodeFillBrush}">
-                                                    <FontIcon x:Name="PropGlyphPreview"
-                                                              FontFamily="Assets/MaterialSymbols.ttf#Material Symbols Outlined"
-                                                              FontSize="22" Foreground="White"
-                                                              HorizontalAlignment="Center" VerticalAlignment="Center" />
-                                                </Border>
-                                                <StackPanel VerticalAlignment="Center" Spacing="2">
-                                                    <TextBlock x:Name="PropLabelDisplay" Text=""
-                                                               FontSize="14" FontWeight="SemiBold" />
-                                                    <TextBlock x:Name="PropActionDisplay" Text=""
-                                                               FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                    <!-- Content (row 0) -->
+                                    <Grid Grid.Row="0">
+                                        <!-- Default message when no node is selected -->
+                                        <TextBlock x:Name="NodeEditDefaultText"
+                                                   Text="Click on a node to edit"
+                                                   VerticalAlignment="Top" HorizontalAlignment="Center"
+                                                   FontSize="14" Margin="0,40,0,0"
+                                                   Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                                   Visibility="Visible" />
+
+                                        <!-- Node edit panel (visible when a node is selected) -->
+                                        <ScrollViewer x:Name="NodeEditPanel" Visibility="Collapsed"
+                                                      VerticalScrollBarVisibility="Auto" Padding="16,0,16,16">
+                                            <StackPanel Spacing="12">
+                                                <!-- Icon + Name preview -->
+                                                <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,16,0,0">
+                                                    <Border x:Name="PropNodePreview"
+                                                            Width="48" Height="48" CornerRadius="24"
+                                                            Background="{StaticResource NodeFillBrush}">
+                                                        <FontIcon x:Name="PropGlyphPreview"
+                                                                  FontFamily="Assets/MaterialSymbols.ttf#Material Symbols Outlined"
+                                                                  FontSize="22" Foreground="White"
+                                                                  HorizontalAlignment="Center" VerticalAlignment="Center" />
+                                                    </Border>
+                                                    <StackPanel VerticalAlignment="Center" Spacing="2">
+                                                        <TextBlock x:Name="PropLabelDisplay" Text=""
+                                                                   FontSize="14" FontWeight="SemiBold" />
+                                                        <TextBlock x:Name="PropActionDisplay" Text=""
+                                                                   FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                    </StackPanel>
                                                 </StackPanel>
-                                            </StackPanel>
 
-                                            <!-- Name -->
-                                            <TextBox x:Name="PropLabelBox" Header="Name"
-                                                     TextChanged="PropLabelBox_TextChanged" />
+                                                <!-- Name -->
+                                                <TextBox x:Name="PropLabelBox" Header="Name"
+                                                         TextChanged="PropLabelBox_TextChanged" />
 
-                                            <!-- Action Type -->
+                                                <!-- Action Type -->
                                             <ComboBox x:Name="PropActionTypeBox" Header="Action Type"
                                                        SelectionChanged="PropActionTypeBox_SelectionChanged" />
 
-                                            <!-- URL (visible only for OpenUrl) -->
-                                            <TextBox x:Name="PropUrlBox" Header="URL"
-                                                     Visibility="Collapsed"
-                                                     TextChanged="PropUrlBox_TextChanged" />
+                                                <!-- URL (visible only for OpenUrl) -->
+                                                <TextBox x:Name="PropUrlBox" Header="URL"
+                                                         Visibility="Collapsed"
+                                                         TextChanged="PropUrlBox_TextChanged" />
 
-                                            <!-- App Picker (visible only for LaunchApp) -->
-                                            <Grid x:Name="PropAppPicker" Visibility="Collapsed" Margin="0,4,0,0">
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="Auto" />
-                                                </Grid.RowDefinitions>
-                                                <Grid Grid.Row="0">
-                                                    <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*" />
-                                                        <ColumnDefinition Width="Auto" />
-                                                    </Grid.ColumnDefinitions>
-                                                    <TextBox x:Name="PropAppPathBox" Grid.Column="0"
-                                                              Header="Application"
-                                                              TextChanged="PropAppPathBox_TextChanged" />
-                                                    <Button x:Name="PropAppBrowseBtn" Grid.Column="1"
-                                                             Content="Browse" Margin="8,20,0,0"
-                                                             VerticalAlignment="Bottom" MinWidth="0"
-                                                             Click="PropAppBrowseBtn_Click" />
-                                                </Grid>
-                                                <TextBlock Grid.Row="1" Text="Available Applications"
-                                                           FontSize="12" FontWeight="SemiBold" Margin="0,12,0,4" />
-                                                <ListView x:Name="PropAppList" Grid.Row="2" Height="160"
-                                                          DisplayMemberPath="DisplayName"
-                                                          SelectionChanged="PropAppList_SelectionChanged">
-                                                    <ListView.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <TextBlock Text="{Binding DisplayName}" FontSize="13" />
-                                                        </DataTemplate>
-                                                    </ListView.ItemTemplate>
-                                                </ListView>
-                                            </Grid>
+                                                <!-- App Path (visible only for LaunchApp) -->
+                                                <StackPanel x:Name="PropAppPathSection" Visibility="Collapsed" Margin="0,8,0,0">
+                                                    <Grid>
+                                                        <Grid.ColumnDefinitions>
+                                                            <ColumnDefinition Width="*" />
+                                                            <ColumnDefinition Width="Auto" />
+                                                        </Grid.ColumnDefinitions>
+                                                        <TextBox x:Name="PropAppPathBox" Grid.Column="0"
+                                                                 Header="Application"
+                                                                 TextChanged="PropAppPathBox_TextChanged" />
+                                                        <Button x:Name="PropChangeAppBtn" Grid.Column="1"
+                                                                Content="Change" Margin="8,20,0,0"
+                                                                VerticalAlignment="Bottom" MinWidth="0"
+                                                                Click="PropChangeAppBtn_Click" />
+                                                    </Grid>
+                                                </StackPanel>
 
-                                            <!-- Ring Colors -->
-                                            <TextBlock Text="Ring Colors" FontSize="13" FontWeight="SemiBold"
-                                                       Margin="0,8,0,0" />
-                                            <StackPanel Spacing="8">
-                                                <TextBlock Text="Primary" FontSize="12" FontWeight="SemiBold" />
-                                                <ColorPicker x:Name="PrimaryColorPicker"
-                                                           IsMoreButtonVisible="True"
-                                                           IsColorSliderVisible="True"
-                                                           IsColorChannelTextInputVisible="True"
-                                                           IsHexInputVisible="True"
-                                                           ColorChanged="PrimaryColorPicker_ColorChanged" />
-                                                <TextBlock Text="Secondary (auto-complementary)" FontSize="12" FontWeight="SemiBold"
-                                                           Margin="0,8,0,0" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                <Border x:Name="SecondaryPreview" Width="32" Height="32" CornerRadius="4"
-                                                        HorizontalAlignment="Left" />
+                                                <!-- Icon -->
+                                                <StackPanel x:Name="IconSection">
+                                                    <TextBlock Text="Icon" FontSize="13" FontWeight="SemiBold"
+                                                               Margin="0,8,0,4" />
+                                                    <Grid>
+                                                        <Grid.RowDefinitions>
+                                                            <RowDefinition Height="Auto" />
+                                                            <RowDefinition Height="*" />
+                                                        </Grid.RowDefinitions>
+                                                        <TextBox x:Name="IconSearchBox" PlaceholderText="Search icons..."
+                                                                 Margin="0,0,0,8"
+                                                                 TextChanged="IconSearchBox_TextChanged" />
+                                                        <GridView x:Name="IconGallery" Grid.Row="1" Height="240"
+                                                                  SelectionChanged="IconGallery_SelectionChanged">
+                                                            <GridView.ItemTemplate>
+                                                                <DataTemplate>
+                                                                    <Border Width="44" Height="44" CornerRadius="8"
+                                                                            Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
+                                                                        <FontIcon FontFamily="Assets/MaterialSymbols.ttf#Material Symbols Outlined"
+                                                                                  Glyph="{Binding Glyph}" FontSize="22"
+                                                                                  HorizontalAlignment="Center"
+                                                                                  VerticalAlignment="Center" />
+                                                                    </Border>
+                                                                </DataTemplate>
+                                                            </GridView.ItemTemplate>
+                                                        </GridView>
+                                                    </Grid>
+                                                </StackPanel>
+
+                                                <!-- Edit Sub-menu (visible for Folder) -->
+                                                <Button x:Name="EditSubmenuBtn" Content="Edit Sub-menu"
+                                                        Click="EditSubmenuBtn_Click"
+                                                        Visibility="Collapsed" />
+
+                                                <!-- Save -->
+                                                <Button x:Name="NodeEditSaveBtn" Content="Save Changes"
+                                                        HorizontalAlignment="Stretch" Margin="0,8,0,0"
+                                                        Click="NodeEditSaveBtn_Click" />
                                             </StackPanel>
+                                        </ScrollViewer>
+                                    </Grid>
 
-                                            <!-- Icon -->
-                                            <TextBlock Text="Icon" FontSize="13" FontWeight="SemiBold"
-                                                       Margin="0,8,0,4" />
-                                            <Grid>
-                                                <Grid.RowDefinitions>
-                                                    <RowDefinition Height="Auto" />
-                                                    <RowDefinition Height="*" />
-                                                </Grid.RowDefinitions>
-                                                <TextBox x:Name="IconSearchBox" PlaceholderText="Search icons..."
-                                                         Margin="0,0,0,8"
-                                                         TextChanged="IconSearchBox_TextChanged" />
-                                                <GridView x:Name="IconGallery" Grid.Row="1" Height="240"
-                                                          SelectionChanged="IconGallery_SelectionChanged">
-                                                    <GridView.ItemTemplate>
-                                                        <DataTemplate>
-                                                            <Border Width="44" Height="44" CornerRadius="8"
-                                                                    Background="{ThemeResource CardBackgroundFillColorDefaultBrush}">
-                                                                <FontIcon FontFamily="Assets/MaterialSymbols.ttf#Material Symbols Outlined"
-                                                                          Glyph="{Binding Glyph}" FontSize="22"
-                                                                          HorizontalAlignment="Center"
-                                                                          VerticalAlignment="Center" />
-                                                            </Border>
-                                                        </DataTemplate>
-                                                    </GridView.ItemTemplate>
-                                                </GridView>
+                                    <!-- Divider (row 1) -->
+                                    <Border Grid.Row="1" Height="1"
+                                            Background="{ThemeResource DividerStrokeColorDefault}" />
+
+                                    <!-- Collapsible Ring Colors (row 2) -->
+                                    <Border Grid.Row="2" Padding="0,0,0,4">
+                                        <StackPanel>
+                                            <Grid x:Name="ColorToggleBtn" Background="Transparent"
+                                                  HorizontalAlignment="Stretch" Padding="12,8"
+                                                  PointerPressed="ColorToggleBtn_PointerPressed">
+                                                <Grid.ColumnDefinitions>
+                                                    <ColumnDefinition Width="Auto" />
+                                                    <ColumnDefinition Width="*" />
+                                                    <ColumnDefinition Width="Auto" />
+                                                </Grid.ColumnDefinitions>
+                                                <FontIcon Grid.Column="0" FontFamily="Assets/MaterialSymbols.ttf#Material Symbols Outlined"
+                                                           Glyph="&#xE243;" FontSize="16" VerticalAlignment="Center" />
+                                                <TextBlock Grid.Column="1" Text="  Ring Colors" FontSize="12"
+                                                           FontWeight="SemiBold" VerticalAlignment="Center" />
+                                                <FontIcon x:Name="ColorChevron" Grid.Column="2"
+                                                          FontFamily="Assets/MaterialSymbols.ttf#Material Symbols Outlined"
+                                                          FontSize="16" Glyph="&#xE316;" VerticalAlignment="Center" />
                                             </Grid>
-
-                                            <!-- Edit Sub-menu (visible for Folder) -->
-                                            <Button x:Name="EditSubmenuBtn" Content="Edit Sub-menu"
-                                                    Click="EditSubmenuBtn_Click"
-                                                    Visibility="Collapsed" />
-
-                                            <!-- Save -->
-                                            <Button x:Name="NodeEditSaveBtn" Content="Save Changes"
-                                                    HorizontalAlignment="Stretch" Margin="0,8,0,0"
-                                                    Click="NodeEditSaveBtn_Click" />
+                                            <Grid x:Name="ColorBody" Height="0">
+                                                <StackPanel Spacing="8" Padding="16,4,16,12">
+                                                    <TextBlock Text="Primary" FontSize="12" FontWeight="SemiBold" />
+                                                    <ColorPicker x:Name="PrimaryColorPicker"
+                                                                IsMoreButtonVisible="True"
+                                                                IsColorSliderVisible="True"
+                                                                IsColorChannelTextInputVisible="True"
+                                                                IsHexInputVisible="True"
+                                                                ColorChanged="PrimaryColorPicker_ColorChanged" />
+                                                    <TextBlock Text="Secondary (auto-complementary)" FontSize="12"
+                                                               FontWeight="SemiBold" Margin="0,4,0,0"
+                                                               Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                                    <Border x:Name="SecondaryPreview" Width="32" Height="32" CornerRadius="4"
+                                                            HorizontalAlignment="Left" />
+                                                </StackPanel>
+                                            </Grid>
                                         </StackPanel>
-                                    </ScrollViewer>
+                                    </Border>
                                 </Grid>
                             </Grid>
+                        </Grid>
+
+                        <!-- ==================== SETTINGS ==================== -->
+                        <Grid x:Name="SettingsPage" Visibility="Collapsed" Margin="0,0,0,24">
+                            <StackPanel Spacing="16">
+                                <TextBlock Text="Settings" FontSize="28" FontWeight="SemiBold" />
+                                <Border Style="{StaticResource SettingsCardStyle}" Padding="20">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="4">
+                                            <TextBlock Text="Launch at startup" FontSize="18" FontWeight="SemiBold" />
+                                            <TextBlock Text="Automatically start when you sign in"
+                                                       FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                        <ToggleSwitch x:Name="StartupToggle" Grid.Column="1" Toggled="StartupToggle_Toggled" />
+                                    </Grid>
+                                </Border>
+                                <Border Style="{StaticResource SettingsCardStyle}" Padding="20">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
+                                            <ColumnDefinition Width="Auto" />
+                                        </Grid.ColumnDefinitions>
+                                        <StackPanel Grid.Column="0" Spacing="4">
+                                            <TextBlock Text="Reset App" FontSize="18" FontWeight="SemiBold" Foreground="#FFD32F2F" />
+                                            <TextBlock Text="Clear all profiles and settings, then restart"
+                                                       FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
+                                        </StackPanel>
+                                        <Button Grid.Column="1" Content="Reset" VerticalAlignment="Center"
+                                                MinWidth="100" Click="ResetAppButton_Click"
+                                                Background="#FFD32F2F" Foreground="White" />
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
                         </Grid>
 
                         <!-- ==================== DEVICES ==================== -->

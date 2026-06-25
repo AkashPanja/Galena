@@ -28,12 +28,19 @@ public sealed partial class OsdWindow : Window
     private readonly List<Ellipse> _optionCircles = new();
     private readonly List<FontIcon> _optionIcons = new();
     private Storyboard? _currentStoryboard;
+    private Storyboard? _seekLoop;
+    private DoubleAnimation _seekAnimX = null!;
+    private DoubleAnimation _seekFade = null!;
+    private bool _seekLoopInitialized;
+    private bool _seekLoopActive;
+    private bool _lastSeekForward;
     private double _radius = 120;
 
     private SolidColorBrush InactiveFill = new(Color.FromArgb(128, 255, 255, 255));
     private SolidColorBrush InactiveStroke = new(Color.FromArgb(255, 102, 102, 102));
     private SolidColorBrush InactiveForeground = new(Color.FromArgb(255, 0, 0, 0));
     private SolidColorBrush ActiveFill = new(Color.FromArgb(255, 0, 0, 0));
+    private SolidColorBrush _seekIconBrush = new(Colors.White);
     private SolidColorBrush ActiveStroke = new(Color.FromArgb(255, 255, 255, 255));
     private SolidColorBrush ActiveForeground = new(Color.FromArgb(255, 255, 255, 255));
 
@@ -93,6 +100,18 @@ public sealed partial class OsdWindow : Window
             ActiveForeground = Luminance(primary) > 128 ? new SolidColorBrush(Color.FromArgb(255, 0, 0, 0)) : new SolidColorBrush(Color.FromArgb(255, 255, 255, 255));
             ActiveStroke = new SolidColorBrush(Color.FromArgb(255,
                 (byte)(255 - primary.R), (byte)(255 - primary.G), (byte)(255 - primary.B)));
+            // Update sub-menu background radial gradient with primary color
+            var gradient = new RadialGradientBrush
+            {
+                MappingMode = BrushMappingMode.Absolute,
+                Center = new Windows.Foundation.Point(80, 80),
+                GradientOrigin = new Windows.Foundation.Point(80, 80),
+                RadiusX = 80,
+                RadiusY = 80,
+            };
+            gradient.GradientStops.Add(new GradientStop { Offset = 0.0, Color = Color.FromArgb(0xCC, primary.R, primary.G, primary.B) });
+            gradient.GradientStops.Add(new GradientStop { Offset = 1.0, Color = Color.FromArgb(0x00, primary.R, primary.G, primary.B) });
+            SubMenuBgEllipse.Fill = gradient;
         }
         if (!string.IsNullOrEmpty(secondaryHex) && TryParseColor(secondaryHex, out var secondary))
         {
@@ -100,6 +119,7 @@ public sealed partial class OsdWindow : Window
             var bgLum = Luminance(secondary);
             InactiveForeground = bgLum > 128 ? new SolidColorBrush(Color.FromArgb(255, 0, 0, 0)) : new SolidColorBrush(Color.FromArgb(255, 255, 255, 255));
             InactiveStroke = new SolidColorBrush(Color.FromArgb(255, 102, 102, 102));
+            _seekIconBrush = new SolidColorBrush(secondary);
         }
     }
 
@@ -457,6 +477,91 @@ public sealed partial class OsdWindow : Window
         }
 
         storyboard.Begin();
+    }
+
+    public void ShowSubMenuBg()
+    {
+        SubMenuBgLayer.Visibility = Visibility.Visible;
+    }
+
+    public void HideSubMenuBg()
+    {
+        SubMenuBgLayer.Visibility = Visibility.Collapsed;
+    }
+
+    public void ShowSeekIndicator(bool forward)
+    {
+        if (!_seekLoopInitialized)
+        {
+            _seekLoop = new Storyboard();
+            _seekLoop.Completed += (_, _) =>
+            {
+                _seekLoopActive = false;
+                SeekIndicator.Opacity = 0;
+            };
+
+            _seekAnimX = new DoubleAnimation
+            {
+                Duration = TimeSpan.FromMilliseconds(400),
+                EasingFunction = new CubicEase { EasingMode = EasingMode.EaseOut },
+            };
+            Storyboard.SetTarget(_seekAnimX, SeekIndicator);
+            Storyboard.SetTargetProperty(_seekAnimX, "(UIElement.RenderTransform).(CompositeTransform.TranslateX)");
+            _seekLoop.Children.Add(_seekAnimX);
+
+            _seekFade = new DoubleAnimation
+            {
+                Duration = TimeSpan.FromMilliseconds(400),
+            };
+            Storyboard.SetTarget(_seekFade, SeekIndicator);
+            Storyboard.SetTargetProperty(_seekFade, "Opacity");
+            _seekLoop.Children.Add(_seekFade);
+
+            _seekLoopInitialized = true;
+        }
+
+        SeekIndicator.Glyph = forward ? "\uEAC9" : "\uEAC3";
+        SeekIndicator.Foreground = _seekIconBrush;
+
+        double currentX;
+        double currentOpacity;
+
+        if (!_seekLoopActive)
+        {
+            currentX = forward ? 20 : -20;
+            currentOpacity = 1.0;
+            SeekIndicatorTransform.TranslateX = currentX;
+            SeekIndicator.Opacity = currentOpacity;
+        }
+        else if (forward != _lastSeekForward)
+        {
+            _seekLoop?.Stop();
+            currentX = forward ? 20 : -20;
+            currentOpacity = 1.0;
+            SeekIndicatorTransform.TranslateX = currentX;
+            SeekIndicator.Opacity = currentOpacity;
+        }
+        else
+        {
+            _seekLoop?.Stop();
+            currentX = SeekIndicatorTransform.TranslateX;
+            currentOpacity = SeekIndicator.Opacity;
+        }
+
+        _seekAnimX.From = currentX;
+        _seekAnimX.To = forward ? 80 : -80;
+        _seekFade.From = currentOpacity;
+        _seekFade.To = 0.0;
+        _seekLoopActive = true;
+        _lastSeekForward = forward;
+        _seekLoop?.Begin();
+    }
+
+    public void StopSeekLoop()
+    {
+        _seekLoop?.Stop();
+        _seekLoopActive = false;
+        SeekIndicator.Opacity = 0;
     }
 
     public void UpdateNodeIcon(int nodeIndex, string glyph)

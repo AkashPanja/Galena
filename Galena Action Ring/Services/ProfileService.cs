@@ -67,16 +67,16 @@ public class ProfileService
             {
                 new() { Glyph = "\uE050", Label = "Volume", ActionType = ActionType.VolumeControl, Category = ActionCategory.Group },
                 new() { Glyph = "\uE1AC", Label = "Brightness", ActionType = ActionType.BrightnessControl, Category = ActionCategory.Group },
-                new() { Glyph = "\uEA07", Label = "Chrome",  ActionType = ActionType.LaunchApp,  ActionData = "chrome" },
-                new() { Glyph = "\uEA5F", Label = "Calc",    ActionType = ActionType.LaunchApp,  ActionData = "calc" },
+                new() { Glyph = "\uEF40", Label = "Edge", ActionType = ActionType.LaunchApp, ActionData = "msedge" },
+                new() { Glyph = "\uE250", Label = "Chrome", ActionType = ActionType.LaunchApp, ActionData = "chrome" },
                 new() { Glyph = "\uE04F", Label = "Mute",    ActionType = ActionType.MuteToggle },
-                new() { Glyph = "\uE05F", Label = "Playback Control", ActionType = ActionType.Folder, Category = ActionCategory.Folder,
+                new() { Glyph = "\uF6B5", Label = "Playback Control", ActionType = ActionType.Folder, Category = ActionCategory.Folder,
                         Children = new List<RingNode>
                         {
-                            new() { Glyph = "\uE01F", Label = "Seek",    ActionType = ActionType.MediaSeekForward },
-                            new() { Glyph = "\uE037", Label = "Play",    ActionType = ActionType.MediaPlayPause },
-                            new() { Glyph = "\uE044", Label = "Next",    ActionType = ActionType.MediaNext },
-                            new() { Glyph = "\uE045", Label = "Prev",    ActionType = ActionType.MediaPrevious },
+                            new() { Glyph = "\uEAC9", Label = "Seek",   ActionType = ActionType.MediaSeekForward },
+                            new() { Glyph = "\uE044", Label = "Next",   ActionType = ActionType.MediaNext },
+                            new() { Glyph = "\uEF6A", Label = "Play",   ActionType = ActionType.MediaPlayPause },
+                            new() { Glyph = "\uE045", Label = "Prev",   ActionType = ActionType.MediaPrevious },
                         }},
                 new() { Glyph = "\uF03D", Label = "Night",   ActionType = ActionType.ToggleNightLight },
                 new() { Glyph = "\uE0C9", Label = "ChatGPT", ActionType = ActionType.OpenUrl, ActionData = "https://chatgpt.com" },
