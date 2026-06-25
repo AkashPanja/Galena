@@ -1,4 +1,5 @@
 using System;
+using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
 using Microsoft.Win32;
@@ -82,17 +83,30 @@ public static class StartupService
 
             if (IsPackaged)
             {
-                using var key = Registry.CurrentUser.OpenSubKey(
-                    @"Software\Microsoft\Windows\CurrentVersion\Run", true);
+                var exePath = GetProcessPath();
                 if (enable)
                 {
-                    key?.SetValue("GalenaActionRing", $"\"{GetProcessPath()}\" --startup");
-                    Log("  Registry Run key written");
+                    var psi = new ProcessStartInfo("reg.exe",
+                        $"add \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v GalenaActionRing /d \"\\\"{exePath}\\\" --startup\" /f")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false
+                    };
+                    using var proc = Process.Start(psi);
+                    proc?.WaitForExit();
+                    Log($"  Registry Run key written via reg.exe (path={exePath})");
                 }
                 else
                 {
-                    key?.DeleteValue("GalenaActionRing", false);
-                    Log("  Registry Run key deleted");
+                    var psi = new ProcessStartInfo("reg.exe",
+                        $"delete \"HKCU\\Software\\Microsoft\\Windows\\CurrentVersion\\Run\" /v GalenaActionRing /f")
+                    {
+                        CreateNoWindow = true,
+                        UseShellExecute = false
+                    };
+                    using var proc = Process.Start(psi);
+                    proc?.WaitForExit();
+                    Log("  Registry Run key deleted via reg.exe");
                 }
             }
             else
