@@ -146,3 +146,88 @@ Build out the Galena Action Ring WinUI 3 app with radial groups, Material Symbol
 - `Galena Action Ring.csproj`: added `TaskScheduler` NuGet v2.12.2; added `<WindowsAppSdkDeploymentManagerInitialize>false</WindowsAppSdkDeploymentManagerInitialize>` (prevents WinAppSDK module initializer that crashes unpackaged)
 - `Properties/launchSettings.json`: two profiles — `"Galena Action Ring (Package)"` (MsixPackage) and `"Galena Action Ring (Unpackaged)"` (Project)
 - `App.xaml.cs`: silent startup detection via `--startup` CLI arg; `Environment.CurrentDirectory = AppDomain.CurrentDomain.BaseDirectory`; `App.GetSetting/SetSetting` helpers using `HKCU\Software\GalenaActionRing` Registry; P/Invokes moved to `BootstrapInitializer.cs`
+
+## Hardware Roadmap (Future)
+### Goal
+Replace ESPHome-based firmware with native ESP-IDF code, migrate MCUs, and replace UART serial with USB HID + BLE HID for PC communication.
+
+### Renaming
+| Old | New | MCU |
+|---|---|---|
+| `halo-desk` | **Galena Light Bar** | ESP32 → **ESP32-C3** |
+| `xenos-infer` | **Galena Action Ring** | ESP32 → **ESP32-S3** |
+
+### Architecture
+```
+[Windows App] ←→ USB HID / BLE HID ←→ [Galena Action Ring (ESP32-S3)]
+                                            ↕ ESP-NOW
+                                       [Galena Light Bar (ESP32-C3)]
+```
+
+### Pin Assignments
+**Galena Light Bar** (ESP32-C3):
+- LEDC_CH → PWM → LED strip
+- MENU → Pulse out (GPIO TBD on C3 pinout)
+- LEFT → Pulse out
+- RIGHT → Pulse out
+- OK → Pulse out
+- BTN → Push button (INPUT_PULLUP, inverted)
+
+**Galena Action Ring** (ESP32-S3):
+- GPIO19 → Encoder pin A
+- GPIO18 → Encoder pin B
+- GPIO21 → Encoder button (INPUT_PULLUP, inverted)
+- USB D+/D- → Native USB TinyUSB HID
+- Built-in BLE → BLE HID (secondary channel)
+
+### USB HID Protocol
+Custom vendor-defined 8-byte reports — compact binary, no ASCII.
+
+**IN Report** (ring → PC, Report ID 0x01):
+| Byte | Field | Values |
+|---|---|---|
+| 1 | Event Type | 0x01=ENCODER_DELTA, 0x02=BUTTON_CLICK, 0x03=BUTTON_HOLD, 0x04=BRIGHTNESS_UPDATE, 0x05=LIGHT_ON_OFF |
+| 2-3 | Event Value | int16 little-endian |
+| 4 | Modifiers | Button bitfield |
+| 5-7 | Reserved | Zero |
+
+**OUT Report** (PC → ring, Report ID 0x02):
+| Byte | Field | Values |
+|---|---|---|
+| 1 | Command | 0x81=SET_BRIGHTNESS, 0x82=SET_LIGHT_STATE, 0x83=QUERY_STATE, 0x84=SET_BRIGHTNESS_STEP |
+| 2-3 | Value | int16 little-endian |
+| 4-7 | Reserved | Zero |
+
+### Communication Paths
+| Path | Protocol | Data |
+|---|---|---|
+| Ring → Light Bar | ESP-NOW | Encoder delta, button events |
+| Light Bar → Ring | ESP-NOW | Brightness %, light on/off state |
+| Ring → PC | USB HID + BLE HID | Ring events + relayed light bar state |
+| PC → Ring | USB HID OUT | Set brightness, set state, query |
+
+### Firmware Components (ESP-IDF)
+**Galena Light Bar** (ESP32-C3):
+- `pwm_control` — LEDC brightness
+- `button` — Debounced GPIO (click/hold)
+- `gpio_pulse` — MENU/LEFT/RIGHT/OK pulse out
+- `espnow_comms` — Paired with ring
+- `brightness_mgr` — Smooth transitions, state machine
+
+**Galena Action Ring** (ESP32-S3):
+- `encoder` — Rotary encoder driver
+- `button` — Debounced encoder button (click/hold)
+- `espnow_comms` — Paired with light bar
+- `hid_report` — Build/serialize HID IN reports
+- `tinyusb_hid` — TinyUSB HID device
+- `ble_hid` — BLE HID GATT service
+- `protocol` — Message dispatch, brightness tracking
+
+### Windows App Changes (Future)
+1. Add `Windows.Devices.HumanInterfaceDevice` capability
+2. Replace `SerialPort` with `HidDevice` watcher (match VID/PID)
+3. Parse 8-byte HID IN reports → dispatch to OSD pipeline
+4. Deprecate/remove serial COM port code
+
+### Not Implemented Yet
+This is a planned future hardware migration. No code has been written for it.

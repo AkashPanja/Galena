@@ -626,6 +626,7 @@ namespace Galena_Action_Ring
             _selectedCanvasIndex = -1;
             SelectProfileColors();
             RenderCanvas();
+            OsdService.Instance.ReloadProfile(profile.Name);
         }
 
         private void SaveCurrentProfile()
