@@ -82,6 +82,7 @@ public class OsdService
         _selectedIndex = 0;
         _osdWindow.SelectOption(0);
         _osdWindow.ShowMenu();
+        ApplyToggleStatesToOsd();
         ResetTimeout();
     }
 
@@ -205,7 +206,10 @@ public class OsdService
                     break;
 
                 case ActionType.MuteToggle:
-                    AudioVolumeControl.SetMute(!AudioVolumeControl.GetMute());
+                    var currentMuted = AudioVolumeControl.GetMute();
+                    AudioVolumeControl.SetMute(!currentMuted);
+                    var muteKey = $"{CurrentProfile.Name}:{nodeIndex}";
+                    _toggleStates[muteKey] = !currentMuted;
                     UpdateToggleIcon(nodeIndex, node);
                     break;
 
@@ -243,18 +247,44 @@ public class OsdService
                     break;
 
                 case ActionType.ToggleNightLight:
+                    var nlLiveEnabled = GetNightLightEnabled();
                     try
                     {
-                        var regPath = @"Software\Microsoft\Windows\CurrentVersion\CloudStore\Store\DefaultAccount\Cloud\default$windows.data.bluelightreduction.bluelightreductionstate\windows.data.bluelightreduction.bluelightreductionstate";
+                        var regPath = @"Software\Microsoft\Windows\CurrentVersion\CloudStore\Store\DefaultAccount\Current\default$windows.data.bluelightreduction.bluelightreductionstate\windows.data.bluelightreduction.bluelightreductionstate";
                         byte[]? data = null;
                         using (var key = Registry.CurrentUser.OpenSubKey(regPath, false))
                         {
                             data = key?.GetValue("Data") as byte[];
                         }
-                        if (data != null && data.Length > 2)
+                        if (data != null && data.Length > 18)
                         {
-                            data[2] = data[2] == 1 ? (byte)0 : (byte)1;
-                            var hex = BitConverter.ToString(data).Replace("-", "");
+                            var enabled = data[18] == 0x15;
+                            byte[] newData;
+                            if (enabled)
+                            {
+                                newData = new byte[41];
+                                Array.Copy(data, 0, newData, 0, 22);
+                                Array.Copy(data, 25, newData, 23, Math.Min(data.Length - 25, 43 - 25));
+                                newData[18] = 0x13;
+                            }
+                            else
+                            {
+                                newData = new byte[43];
+                                Array.Copy(data, 0, newData, 0, 22);
+                                Array.Copy(data, 23, newData, 25, Math.Min(data.Length - 23, 41 - 23));
+                                newData[18] = 0x15;
+                                newData[23] = 0x10;
+                                newData[24] = 0x00;
+                            }
+                            for (int i = 10; i < 15; i++)
+                            {
+                                if (newData[i] != 0xff)
+                                {
+                                    newData[i]++;
+                                    break;
+                                }
+                            }
+                            var hex = BitConverter.ToString(newData).Replace("-", "");
                             var psi = new ProcessStartInfo("reg.exe",
                                 $"add \"HKCU\\{regPath}\" /v Data /t REG_BINARY /d {hex} /f")
                             {
@@ -275,7 +305,7 @@ public class OsdService
                         Process.Start(new ProcessStartInfo("ms-settings:nightlight") { UseShellExecute = true })?.Dispose();
                     }
                     var nlKey = $"{CurrentProfile.Name}:{nodeIndex}";
-                    _toggleStates[nlKey] = !_toggleStates.GetValueOrDefault(nlKey);
+                    _toggleStates[nlKey] = !nlLiveEnabled;
                     UpdateToggleIcon(nodeIndex, node);
                     break;
 
@@ -477,6 +507,18 @@ public class OsdService
         catch { return null; }
     }
 
+    private static bool GetNightLightEnabled()
+    {
+        try
+        {
+            var regPath = @"Software\Microsoft\Windows\CurrentVersion\CloudStore\Store\DefaultAccount\Current\default$windows.data.bluelightreduction.bluelightreductionstate\windows.data.bluelightreduction.bluelightreductionstate";
+            using var key = Registry.CurrentUser.OpenSubKey(regPath, false);
+            var data = key?.GetValue("Data") as byte[];
+            return data != null && data.Length > 18 && data[18] == 0x15;
+        }
+        catch { return false; }
+    }
+
     private async void ApplyToggleStatesToOsd()
     {
         if (_osdWindow == null) return;
@@ -501,6 +543,13 @@ public class OsdService
                     glyph = "\uE034";
                 else
                     glyph = "\uE037";
+                _osdWindow.UpdateNodeIcon(i, glyph);
+            }
+            else if (node.ActionType == ActionType.ToggleNightLight)
+            {
+                var enabled = GetNightLightEnabled();
+                _toggleStates[key] = enabled;
+                var glyph = enabled ? "\uF03D" : "\uE51C";
                 _osdWindow.UpdateNodeIcon(i, glyph);
             }
             else if (_toggleStates.TryGetValue(key, out var isOn) && isOn)
@@ -530,9 +579,8 @@ public class OsdService
         var key = $"{CurrentProfile.Name}:{nodeIndex}";
         if (node.ActionType == ActionType.MuteToggle)
         {
-            var muted = AudioVolumeControl.GetMute();
-            _toggleStates[key] = muted;
-            var glyph = muted ? "\uF14B" : "\uE710";
+            var isOn = _toggleStates.GetValueOrDefault(key);
+            var glyph = isOn ? "\uF14B" : "\uE710";
             _osdWindow?.UpdateNodeIcon(nodeIndex, glyph);
         }
         else if (node.ActionType == ActionType.MediaPlayPause)
@@ -542,7 +590,8 @@ public class OsdService
         else if (node.ActionType == ActionType.ToggleNightLight)
         {
             var isOn = _toggleStates.GetValueOrDefault(key);
-            _osdWindow?.UpdateNodeIcon(nodeIndex, "\uF03D");
+            var glyph = isOn ? "\uF03D" : "\uE51C";
+            _osdWindow?.UpdateNodeIcon(nodeIndex, glyph);
         }
         else
         {
