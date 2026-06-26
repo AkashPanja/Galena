@@ -24,6 +24,8 @@ public sealed partial class OsdWindow : Window
     private const uint SWP_NOACTIVATE = 0x0010;
     private const uint SWP_NOMOVE = 0x0002;
     private const uint SWP_NOSIZE = 0x0001;
+    private const uint SWP_FRAMECHANGED = 0x0020;
+    private const uint SWP_NOZORDER = 0x0004;
     private readonly List<Grid> _optionElements = new();
     private readonly List<Ellipse> _optionCircles = new();
     private readonly List<FontIcon> _optionIcons = new();
@@ -99,6 +101,8 @@ public sealed partial class OsdWindow : Window
         const int WS_EX_TOOLWINDOW = 0x80;
         var exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
         SetWindowLongPtr(hwnd, GWL_EXSTYLE, new IntPtr(exStyle.ToInt64() | WS_EX_TOOLWINDOW));
+        SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0,
+            SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_FRAMECHANGED);
     }
 
     public void ApplyProfileColors(string primaryHex, string secondaryHex)

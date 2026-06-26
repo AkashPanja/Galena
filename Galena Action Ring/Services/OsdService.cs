@@ -19,7 +19,7 @@ public class OsdService
 
     private OsdWindow? _osdWindow;
     private DispatcherTimer? _timeoutTimer;
-    private DispatcherTimer? _liveStateTimer;
+    private DispatcherTimer _liveStateTimer = null!;
     private int _selectedIndex;
     private bool _isVisible;
     private RingNode? _previousFolderNode;
@@ -61,6 +61,9 @@ public class OsdService
 
         _timeoutTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(8) };
         _timeoutTimer.Tick += (_, _) => Hide();
+
+        _liveStateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _liveStateTimer.Tick += (_, _) => ApplyToggleStatesToOsd();
     }
 
     public void ReloadProfile(string profileName = "Default")
@@ -84,9 +87,6 @@ public class OsdService
         _osdWindow.SelectOption(0);
         _osdWindow.ShowMenu();
         ApplyToggleStatesToOsd();
-        _liveStateTimer?.Stop();
-        _liveStateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        _liveStateTimer.Tick += (_, _) => ApplyToggleStatesToOsd();
         _liveStateTimer.Start();
         ResetTimeout();
     }
