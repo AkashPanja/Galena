@@ -3,6 +3,7 @@ using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using Microsoft.Win32;
 
 using System.Management;
 using System.Runtime.InteropServices;
@@ -244,12 +245,30 @@ public class OsdService
                 case ActionType.ToggleNightLight:
                     try
                     {
-                        Process.Start(new ProcessStartInfo("powershell.exe",
-                            "-NoProfile -NonInteractive -Command \"$t = [Windows.Internal.Devices.Brightness.BlueLightReduction,Windows.Internal.Devices.Brightness,ContentType=WindowsRuntime]; if ($t) { $b = [Windows.Internal.Devices.Brightness.BlueLightReduction]::GetForCurrentView(); $b.IsEnabled = !$b.IsEnabled }\"")
+                        var regPath = @"Software\Microsoft\Windows\CurrentVersion\CloudStore\Store\DefaultAccount\Cloud\default$windows.data.bluelightreduction.bluelightreductionstate\windows.data.bluelightreduction.bluelightreductionstate";
+                        byte[]? data = null;
+                        using (var key = Registry.CurrentUser.OpenSubKey(regPath, false))
                         {
-                            CreateNoWindow = true,
-                            UseShellExecute = false
-                        })?.Dispose();
+                            data = key?.GetValue("Data") as byte[];
+                        }
+                        if (data != null && data.Length > 2)
+                        {
+                            data[2] = data[2] == 1 ? (byte)0 : (byte)1;
+                            var hex = BitConverter.ToString(data).Replace("-", "");
+                            var psi = new ProcessStartInfo("reg.exe",
+                                $"add \"HKCU\\{regPath}\" /v Data /t REG_BINARY /d {hex} /f")
+                            {
+                                CreateNoWindow = true,
+                                UseShellExecute = false
+                            };
+                            using var proc = Process.Start(psi);
+                            proc?.WaitForExit();
+                            _ = NativeMethods.SendMessageTimeout(
+                                new IntPtr(NativeMethods.HWND_BROADCAST),
+                                NativeMethods.WM_SETTINGCHANGE,
+                                IntPtr.Zero, IntPtr.Zero,
+                                NativeMethods.SMTO_ABORTIFHUNG, 5000, out _);
+                        }
                     }
                     catch
                     {

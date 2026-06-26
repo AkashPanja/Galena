@@ -5,17 +5,16 @@ namespace Galena_Action_Ring;
 
 public static class AudioVolumeControl
 {
-    private static IAudioEndpointVolume? _endpointVolume;
+    private static IMMDeviceEnumerator? _enumerator;
 
-    private static void EnsureInitialized()
+    private static IAudioEndpointVolume? GetEndpoint()
     {
-        if (_endpointVolume != null) return;
         try
         {
+            _enumerator ??= (IMMDeviceEnumerator)new MMDeviceEnumerator();
+
             var iid = new Guid("5CDF2C82-841E-4546-9722-0CF74078229A");
-            var enumerator = new MMDeviceEnumerator();
-            var devEnum = (IMMDeviceEnumerator)enumerator;
-            int hr = devEnum.GetDefaultAudioEndpoint(0, 0, out IntPtr devicePtr);
+            int hr = _enumerator.GetDefaultAudioEndpoint(0, 0, out IntPtr devicePtr);
             Marshal.ThrowExceptionForHR(hr);
 
             var device = (IMMDevice)Marshal.GetObjectForIUnknown(devicePtr);
@@ -23,70 +22,72 @@ public static class AudioVolumeControl
             Marshal.Release(devicePtr);
             Marshal.ThrowExceptionForHR(hr);
 
-            _endpointVolume = (IAudioEndpointVolume)Marshal.GetObjectForIUnknown(epvPtr);
+            var epv = (IAudioEndpointVolume)Marshal.GetObjectForIUnknown(epvPtr);
             Marshal.Release(epvPtr);
+            return epv;
         }
-        catch
-        {
-            _endpointVolume = null;
-        }
+        catch { return null; }
     }
 
     public static int GetVolume()
     {
-        EnsureInitialized();
-        if (_endpointVolume == null) return 50;
+        var epv = GetEndpoint();
+        if (epv == null) return 50;
         try
         {
-            int hr = _endpointVolume.GetMasterVolumeLevelScalar(out float level);
+            int hr = epv.GetMasterVolumeLevelScalar(out float level);
             if (hr < 0) return 50;
             return (int)Math.Round(level * 100);
         }
         catch { return 50; }
+        finally { Marshal.ReleaseComObject(epv); }
     }
 
     public static void SetVolume(int percent)
     {
-        EnsureInitialized();
-        if (_endpointVolume == null) return;
+        var epv = GetEndpoint();
+        if (epv == null) return;
         try
         {
             float level = Math.Clamp(percent, 0, 100) / 100f;
-            _endpointVolume.SetMasterVolumeLevelScalar(level, IntPtr.Zero);
+            epv.SetMasterVolumeLevelScalar(level, IntPtr.Zero);
         }
         catch { }
+        finally { Marshal.ReleaseComObject(epv); }
     }
 
     public static bool GetMute()
     {
-        EnsureInitialized();
-        if (_endpointVolume == null) return false;
+        var epv = GetEndpoint();
+        if (epv == null) return false;
         try
         {
-            int hr = _endpointVolume.GetMute(out int mute);
+            int hr = epv.GetMute(out int mute);
             if (hr < 0) return false;
             return mute != 0;
         }
         catch { return false; }
+        finally { Marshal.ReleaseComObject(epv); }
     }
 
     public static void SetMute(bool mute)
     {
-        EnsureInitialized();
-        if (_endpointVolume == null) return;
+        var epv = GetEndpoint();
+        if (epv == null) return;
         try
         {
-            _endpointVolume.SetMute(mute ? 1 : 0, IntPtr.Zero);
+            epv.SetMute(mute ? 1 : 0, IntPtr.Zero);
         }
         catch { }
+        finally { Marshal.ReleaseComObject(epv); }
     }
 
     public static void Cleanup()
     {
-        if (_endpointVolume != null)
+        if (_enumerator != null)
         {
-            Marshal.ReleaseComObject(_endpointVolume);
-            _endpointVolume = null;
+            Marshal.ReleaseComObject(_enumerator);
+            _enumerator = null;
         }
     }
 }
