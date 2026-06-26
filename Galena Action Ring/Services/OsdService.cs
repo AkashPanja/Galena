@@ -242,7 +242,22 @@ public class OsdService
                     break;
 
                 case ActionType.ToggleNightLight:
-                    Process.Start(new ProcessStartInfo("ms-settings:nightlight") { UseShellExecute = true });
+                    try
+                    {
+                        Process.Start(new ProcessStartInfo("powershell.exe",
+                            "-NoProfile -NonInteractive -Command \"$t = [Windows.Internal.Devices.Brightness.BlueLightReduction,Windows.Internal.Devices.Brightness,ContentType=WindowsRuntime]; if ($t) { $b = [Windows.Internal.Devices.Brightness.BlueLightReduction]::GetForCurrentView(); $b.IsEnabled = !$b.IsEnabled }\"")
+                        {
+                            CreateNoWindow = true,
+                            UseShellExecute = false
+                        })?.Dispose();
+                    }
+                    catch
+                    {
+                        Process.Start(new ProcessStartInfo("ms-settings:nightlight") { UseShellExecute = true })?.Dispose();
+                    }
+                    var nlKey = $"{CurrentProfile.Name}:{nodeIndex}";
+                    _toggleStates[nlKey] = !_toggleStates.GetValueOrDefault(nlKey);
+                    UpdateToggleIcon(nodeIndex, node);
                     break;
 
                 case ActionType.Folder:
@@ -454,7 +469,7 @@ public class OsdService
             {
                 var muted = AudioVolumeControl.GetMute();
                 _toggleStates[key] = muted;
-                var glyph = muted ? "\uE04F" : "\uE050";
+                var glyph = muted ? "\uF14B" : "\uE710";
                 _osdWindow.UpdateNodeIcon(i, glyph);
             }
             else if (node.ActionType == ActionType.MediaPlayPause)
@@ -498,12 +513,17 @@ public class OsdService
         {
             var muted = AudioVolumeControl.GetMute();
             _toggleStates[key] = muted;
-            var glyph = muted ? "\uE04F" : "\uE050";
+            var glyph = muted ? "\uF14B" : "\uE710";
             _osdWindow?.UpdateNodeIcon(nodeIndex, glyph);
         }
         else if (node.ActionType == ActionType.MediaPlayPause)
         {
             UpdateMediaPlayPauseIcon(nodeIndex);
+        }
+        else if (node.ActionType == ActionType.ToggleNightLight)
+        {
+            var isOn = _toggleStates.GetValueOrDefault(key);
+            _osdWindow?.UpdateNodeIcon(nodeIndex, "\uF03D");
         }
         else
         {

@@ -67,9 +67,9 @@ public class ProfileService
             {
                 new() { Glyph = "\uE050", Label = "Volume", ActionType = ActionType.VolumeControl, Category = ActionCategory.Group },
                 new() { Glyph = "\uE1AC", Label = "Brightness", ActionType = ActionType.BrightnessControl, Category = ActionCategory.Group },
-                new() { Glyph = "\uEF40", Label = "Edge", ActionType = ActionType.LaunchApp, ActionData = "msedge" },
-                new() { Glyph = "\uE250", Label = "Chrome", ActionType = ActionType.LaunchApp, ActionData = "chrome" },
-                new() { Glyph = "\uE04F", Label = "Mute",    ActionType = ActionType.MuteToggle },
+                new() { Glyph = "\uEA5F", Label = "Calc", ActionType = ActionType.LaunchApp, ActionData = "calc" },
+                new() { Glyph = "\uEF7A", Label = "Chrome", ActionType = ActionType.OpenUrl, ActionData = "https://www.google.com" },
+                new() { Glyph = "\uE710", Label = "Mute",    ActionType = ActionType.MuteToggle },
                 new() { Glyph = "\uF6B5", Label = "Playback Control", ActionType = ActionType.Folder, Category = ActionCategory.Folder,
                         Children = new List<RingNode>
                         {

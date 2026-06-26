@@ -1020,7 +1020,7 @@ namespace Galena_Action_Ring
             AddSeparator();
             AddItem(ActionType.VolumeUp, "Volume Up", "\uE050");
             AddItem(ActionType.VolumeDown, "Volume Down", "\uE04D");
-            AddItem(ActionType.MuteToggle, "Mute Toggle", "\uE04F");
+            AddItem(ActionType.MuteToggle, "Mute Toggle", "\uE710");
 
             AddSeparator();
             AddItem(ActionType.BrightnessUp, "Brightness Up", "\uE3AC");
@@ -1113,7 +1113,7 @@ namespace Galena_Action_Ring
                 PropGlyphPreview.Glyph = defaultGlyph;
                 node.ActionData = newType switch
                 {
-                    ActionType.LaunchApp => "msedge",
+                    ActionType.LaunchApp => "calc",
                     ActionType.OpenUrl => "",
                     ActionType.TextExpansion => "",
                     _ => ""
@@ -1212,7 +1212,7 @@ namespace Galena_Action_Ring
         {
             ActionType.VolumeUp => ("\uE050", "Volume Up"),
             ActionType.VolumeDown => ("\uE04D", "Volume Down"),
-            ActionType.MuteToggle => ("\uE050", "Mute"),
+            ActionType.MuteToggle => ("\uE710", "Mute"),
             ActionType.VolumeControl => ("\uE050", "Volume"),
             ActionType.BrightnessUp => ("\uE1AC", "Brightness Up"),
             ActionType.BrightnessDown => ("\uE1AD", "Brightness Down"),
@@ -1223,7 +1223,7 @@ namespace Galena_Action_Ring
             ActionType.MediaSeekForward => ("\uEAC9", "Seek"),
             ActionType.MediaSeekBackward => ("\uE020", "Rewind"),
             ActionType.Folder => ("\uF6B5", "Playback Control"),
-            ActionType.LaunchApp => ("\uEF40", "Edge"),
+            ActionType.LaunchApp => ("\uEA5F", "App"),
             ActionType.OpenUrl => ("\uE250", "Website"),
             ActionType.TextExpansion => ("\uE86F", "Type"),
             ActionType.ToggleNightLight => ("\uF03D", "Night Light"),
