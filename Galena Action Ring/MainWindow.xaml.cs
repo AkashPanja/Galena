@@ -975,7 +975,7 @@ namespace Galena_Action_Ring
                 ? Visibility.Visible : Visibility.Collapsed;
 
             // Show icon gallery for non-toggle nodes (load items source only when first shown)
-            var showIconGallery = node.ActionType != ActionType.MuteToggle && node.ActionType != ActionType.MediaPlayPause;
+            var showIconGallery = !IsToggleType(node.ActionType);
             IconSection.Visibility = showIconGallery ? Visibility.Visible : Visibility.Collapsed;
             if (showIconGallery) EnsureIconGalleryLoaded();
 
@@ -1069,6 +1069,14 @@ namespace Galena_Action_Ring
             };
         }
 
+        private static bool IsToggleType(ActionType type) => type switch
+        {
+            ActionType.MuteToggle => true,
+            ActionType.MediaPlayPause => true,
+            ActionType.ToggleNightLight => true,
+            _ => false
+        };
+
         private void HideNodeProperties()
         {
             NodeEditPanel.Visibility = Visibility.Collapsed;
@@ -1128,7 +1136,7 @@ namespace Galena_Action_Ring
                 if (newType == ActionType.LaunchApp)
                     PropAppPathBox.Text = node.ActionData;
 
-                var showIcon = newType != ActionType.MuteToggle && newType != ActionType.MediaPlayPause;
+                var showIcon = !IsToggleType(newType);
                 IconSection.Visibility = showIcon ? Visibility.Visible : Visibility.Collapsed;
                 if (showIcon) EnsureIconGalleryLoaded();
 

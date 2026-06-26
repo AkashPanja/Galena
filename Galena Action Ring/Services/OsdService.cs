@@ -19,6 +19,7 @@ public class OsdService
 
     private OsdWindow? _osdWindow;
     private DispatcherTimer? _timeoutTimer;
+    private DispatcherTimer? _liveStateTimer;
     private int _selectedIndex;
     private bool _isVisible;
     private RingNode? _previousFolderNode;
@@ -83,6 +84,10 @@ public class OsdService
         _osdWindow.SelectOption(0);
         _osdWindow.ShowMenu();
         ApplyToggleStatesToOsd();
+        _liveStateTimer?.Stop();
+        _liveStateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _liveStateTimer.Tick += (_, _) => ApplyToggleStatesToOsd();
+        _liveStateTimer.Start();
         ResetTimeout();
     }
 
@@ -94,6 +99,7 @@ public class OsdService
         _osdWindow?.HideSubMenuBg();
         _isVisible = false;
         _timeoutTimer?.Stop();
+        _liveStateTimer?.Stop();
         _osdWindow.HideMenu(() =>
         {
             NativeMethods.HideWindow(_osdWindow);

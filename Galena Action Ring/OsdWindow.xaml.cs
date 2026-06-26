@@ -52,6 +52,10 @@ public sealed partial class OsdWindow : Window
     private static extern bool SetWindowPos(IntPtr hWnd, IntPtr hWndInsertAfter, int X, int Y, int cx, int cy, uint uFlags);
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attr, ref int attrValue, int attrSize);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr GetWindowLongPtr(IntPtr hWnd, int nIndex);
+    [DllImport("user32.dll", SetLastError = true)]
+    private static extern IntPtr SetWindowLongPtr(IntPtr hWnd, int nIndex, IntPtr dwNewLong);
 
     public OsdWindow()
     {
@@ -90,6 +94,11 @@ public sealed partial class OsdWindow : Window
 
         SetWindowPos(hwnd, (IntPtr)(-1), 0, 0, 0, 0,
             SWP_NOACTIVATE | SWP_NOMOVE | SWP_NOSIZE);
+
+        const int GWL_EXSTYLE = -20;
+        const int WS_EX_TOOLWINDOW = 0x80;
+        var exStyle = GetWindowLongPtr(hwnd, GWL_EXSTYLE);
+        SetWindowLongPtr(hwnd, GWL_EXSTYLE, new IntPtr(exStyle.ToInt64() | WS_EX_TOOLWINDOW));
     }
 
     public void ApplyProfileColors(string primaryHex, string secondaryHex)
