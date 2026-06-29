@@ -65,6 +65,168 @@ internal static class NativeMethods
     [DllImport("Dwmapi.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int dwAttribute, ref int pvAttribute, int cbAttribute);
 
+    private const uint GENERIC_READ = 0x80000000;
+    private const uint GENERIC_WRITE = 0x40000000;
+    private const uint FILE_SHARE_READ = 0x00000001;
+    private const uint FILE_SHARE_WRITE = 0x00000002;
+    private const uint OPEN_EXISTING = 3;
+    private const uint FILE_ATTRIBUTE_NORMAL = 0x00000080;
+    private static readonly IntPtr INVALID_HANDLE_VALUE = new(-1);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateFileW(
+        string lpFileName, uint dwDesiredAccess, uint dwShareMode,
+        IntPtr lpSecurityAttributes, uint dwCreationDisposition,
+        uint dwFlagsAndAttributes, IntPtr hTemplateFile);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CloseHandle(IntPtr hObject);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool ReadFile(
+        IntPtr hFile, byte[] lpBuffer, uint nNumberOfBytesToRead,
+        out uint lpNumberOfBytesRead, IntPtr lpOverlapped);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    private static extern bool CancelIoEx(IntPtr hFile, IntPtr lpOverlapped);
+
+    [DllImport("hid.dll", SetLastError = true)]
+    private static extern bool HidD_SetFeature(
+        IntPtr HidDeviceObject, byte[] ReportBuffer, uint ReportBufferLength);
+
+    [DllImport("hid.dll", SetLastError = true)]
+    private static extern bool HidD_GetPreparsedData(
+        IntPtr HidDeviceObject, out IntPtr PreparsedData);
+
+    [DllImport("hid.dll", SetLastError = true)]
+    private static extern bool HidD_FreePreparsedData(IntPtr PreparsedData);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct HIDP_CAPS
+    {
+        public ushort Usage;
+        public ushort UsagePage;
+        public ushort InputReportByteLength;
+        public ushort OutputReportByteLength;
+        public ushort FeatureReportByteLength;
+        [MarshalAs(UnmanagedType.ByValArray, SizeConst = 17)]
+        public ushort[] Reserved;
+        public ushort NumberLinkCollectionNodes;
+        public ushort NumberInputButtonCaps;
+        public ushort NumberInputValueCaps;
+        public ushort NumberInputDataIndices;
+        public ushort NumberOutputButtonCaps;
+        public ushort NumberOutputValueCaps;
+        public ushort NumberOutputDataIndices;
+        public ushort NumberFeatureButtonCaps;
+        public ushort NumberFeatureValueCaps;
+        public ushort NumberFeatureDataIndices;
+    }
+
+    [DllImport("hid.dll", SetLastError = true)]
+    private static extern uint HidP_GetCaps(IntPtr PreparsedData, out HIDP_CAPS Caps);
+
+    public static IntPtr OpenHidDeviceRead(string devicePath, out int win32Error)
+    {
+        win32Error = 0;
+        var handle = CreateFileW(
+            devicePath, GENERIC_READ,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            IntPtr.Zero, OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL, IntPtr.Zero);
+        if (handle == INVALID_HANDLE_VALUE)
+            win32Error = Marshal.GetLastWin32Error();
+        return handle;
+    }
+
+    public static IntPtr OpenHidDeviceWrite(string devicePath, out int win32Error)
+    {
+        win32Error = 0;
+        var handle = CreateFileW(
+            devicePath, GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            IntPtr.Zero, OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL, IntPtr.Zero);
+        if (handle == INVALID_HANDLE_VALUE)
+            win32Error = Marshal.GetLastWin32Error();
+        return handle;
+    }
+
+    public static IntPtr OpenHidDeviceReadWrite(string devicePath, out int win32Error)
+    {
+        win32Error = 0;
+        var handle = CreateFileW(
+            devicePath, GENERIC_READ | GENERIC_WRITE,
+            FILE_SHARE_READ | FILE_SHARE_WRITE,
+            IntPtr.Zero, OPEN_EXISTING,
+            FILE_ATTRIBUTE_NORMAL, IntPtr.Zero);
+        if (handle == INVALID_HANDLE_VALUE)
+            win32Error = Marshal.GetLastWin32Error();
+        return handle;
+    }
+
+    public static void CloseHidDevice(IntPtr handle)
+    {
+        if (handle != IntPtr.Zero && handle != INVALID_HANDLE_VALUE)
+            CloseHandle(handle);
+    }
+
+    public static bool IsValidHandle(IntPtr handle) =>
+        handle != IntPtr.Zero && handle != INVALID_HANDLE_VALUE;
+
+    public static ushort GetInputReportByteLength(IntPtr deviceHandle)
+    {
+        if (!HidD_GetPreparsedData(deviceHandle, out IntPtr preparsedData))
+            return 0;
+        try
+        {
+            HidP_GetCaps(preparsedData, out HIDP_CAPS caps);
+            return caps.InputReportByteLength;
+        }
+        finally
+        {
+            HidD_FreePreparsedData(preparsedData);
+        }
+    }
+
+    public static ushort GetFeatureReportByteLength(IntPtr deviceHandle)
+    {
+        if (!HidD_GetPreparsedData(deviceHandle, out IntPtr preparsedData))
+            return 0;
+        try
+        {
+            HidP_GetCaps(preparsedData, out HIDP_CAPS caps);
+            return caps.FeatureReportByteLength;
+        }
+        finally
+        {
+            HidD_FreePreparsedData(preparsedData);
+        }
+    }
+
+    public static bool ReadInputReport(IntPtr readHandle, byte[] buffer, uint bytesToRead, out uint bytesRead)
+    {
+        return ReadFile(readHandle, buffer, bytesToRead, out bytesRead, IntPtr.Zero);
+    }
+
+    public static bool SendHidFeatureReport(IntPtr writeHandle, byte reportId, byte[] payload)
+    {
+        ushort featureLen = GetFeatureReportByteLength(writeHandle);
+        if (featureLen == 0) return false;
+
+        var buf = new byte[featureLen];
+        buf[0] = reportId;
+        int copyLen = Math.Min(payload.Length, featureLen - 1);
+        Array.Copy(payload, 0, buf, 1, copyLen);
+
+        return HidD_SetFeature(writeHandle, buf, (uint)featureLen);
+    }
+
+    public static void CancelRead(IntPtr readHandle)
+    {
+        CancelIoEx(readHandle, IntPtr.Zero);
+    }
+
     private static IntPtr GetHwnd(Window window) =>
         WindowNative.GetWindowHandle(window);
 

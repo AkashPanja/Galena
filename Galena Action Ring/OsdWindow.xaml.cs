@@ -190,6 +190,11 @@ public sealed partial class OsdWindow : Window
         RadialPercent.Text = $"{percent}%";
     }
 
+    public void UpdateRadialStatus(string status)
+    {
+        RadialStatus.Text = status;
+    }
+
     public void HideRadialProgress()
     {
         var fadeOut = new DoubleAnimation
@@ -208,6 +213,14 @@ public sealed partial class OsdWindow : Window
             CenterButton.Visibility = Visibility.Visible;
         };
         sb.Begin();
+    }
+
+    public void HideRadialLayer()
+    {
+        RadialProgressLayer.Visibility = Visibility.Collapsed;
+        RadialProgressLayer.Opacity = 0;
+        OptionsContainer.Visibility = Visibility.Visible;
+        CenterButton.Visibility = Visibility.Visible;
     }
 
     #endregion

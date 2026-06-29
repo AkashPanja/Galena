@@ -51,9 +51,11 @@
                 </Ellipse.Fill>
             </Ellipse>
             <TextBlock x:Name="RadialLabel" Text="" FontSize="14" Foreground="#AAFFFFFF"
-                       HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-80,0,0" />
+                        HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,-80,0,0" />
             <TextBlock x:Name="RadialPercent" Text="0%" FontSize="44" FontWeight="Bold" Foreground="White"
-                       HorizontalAlignment="Center" VerticalAlignment="Center" />
+                        HorizontalAlignment="Center" VerticalAlignment="Center" />
+            <TextBlock x:Name="RadialStatus" Text="" FontSize="14" Foreground="#AAFFFFFF"
+                        HorizontalAlignment="Center" VerticalAlignment="Center" Margin="0,75,0,0" />
         </Grid>
 
 

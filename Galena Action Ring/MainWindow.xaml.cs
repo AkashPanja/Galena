@@ -10,12 +10,14 @@ using System;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.ComponentModel;
-using System.IO.Ports;
 using System.Linq;
 using System.Runtime.CompilerServices;
+using System.Runtime.InteropServices;
 using System.Text;
+using System.Threading;
 using System.Threading.Tasks;
 using Windows.Devices.Enumeration;
+using Windows.Devices.HumanInterfaceDevice;
 using Windows.Graphics;
 using Windows.Storage;
 using Windows.Storage.Pickers;
@@ -25,16 +27,29 @@ using WinRT.Interop;
 
 namespace Galena_Action_Ring
 {
+    internal class DeviceEntry
+    {
+        public string Id { get; set; } = "";
+        public string DisplayName { get; set; } = "";
+        public bool IsConnected { get; set; }
+        public SolidColorBrush StatusColor => IsConnected
+            ? new SolidColorBrush(Color.FromArgb(255, 16, 185, 129))
+            : new SolidColorBrush(Color.FromArgb(255, 128, 128, 128));
+    }
+
     public sealed partial class MainWindow : Window
     {
         private readonly TrayService _trayService = new();
-        private SerialPort? _serialPort;
-        private DispatcherTimer? _pollTimer;
+        private IntPtr _hidReadHandle;
+        private IntPtr _hidWriteHandle;
+        private CancellationTokenSource? _hidReadCts;
+        private string? _connectedDeviceId;
+        private DeviceWatcher? _deviceWatcher;
         private readonly StringBuilder _debugLog = new();
-        private bool _isConnected;
-        private bool _manualDisconnect;
+        private readonly ObservableCollection<DeviceEntry> _deviceEntries = new();
+        private int _lastBrightness = 100;
+        private bool _lightBarOn = true;
 
-        public ObservableCollection<DeviceItem> DeviceItems { get; } = new();
 
         // Canvas editor state
         private List<RingNode> _canvasNodes = new();
@@ -76,14 +91,12 @@ namespace Galena_Action_Ring
         public MainWindow()
         {
             InitializeComponent();
-            DeviceListControl.ItemsSource = DeviceItems;
-
             ExtendsContentIntoTitleBar = true;
             SetTitleBar(AppTitleBar);
             NavView.SelectedItem = NavBluetooth;
 
-            _trayService.ShowRequested += () => NativeMethods.ShowTopmost(this);
-            _trayService.HideRequested += () => NativeMethods.HideWindow(this);
+            _trayService.ShowRequested += () => NativeMethods.ShowTopmost(this!);
+            _trayService.HideRequested += () => NativeMethods.HideWindow(this!);
             _trayService.CloseRequested += async () => await ShowCloseDialog();
             _trayService.ExitRequested += () =>
             {
@@ -91,6 +104,8 @@ namespace Galena_Action_Ring
                 Application.Current.Exit();
             };
             _trayService.Setup(this);
+
+            OsdService.Instance.OsdVisibilityChanged += _ => SendOsdState();
 
             // Register converters for XAML binding
             AppRoot.Resources["BoolToVis"] = new BoolToVisibilityConverter();
@@ -100,9 +115,7 @@ namespace Galena_Action_Ring
 
             InitAppProfiles();
             LoadCurrentProfile();
-
-            _ = RefreshDeviceListAsync();
-            StartPollTimer();
+            _ = FindHidDevicesAsync();
 
             PropActionTypeBox.ItemTemplate = (DataTemplate)AppRoot.Resources["ActionTypeItemTemplate"];
             PopulateActionTypeBox();
@@ -146,263 +159,242 @@ namespace Galena_Action_Ring
             }
         }
 
-        private async Task RefreshDeviceListAsync()
+        private async Task FindHidDevicesAsync()
         {
-            DeviceItems.Clear();
-
-            var portNames = SerialPort.GetPortNames();
-
-            var friendlyNames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-            var deviceTypes = new Dictionary<string, DeviceType>(StringComparer.OrdinalIgnoreCase);
             try
             {
-                var selector = "System.Devices.InterfaceClassGuid:=\"{86e0d1e0-8089-11d0-9ce4-08003e301f73}\"";
-                var devices = await DeviceInformation.FindAllAsync(selector, null);
-                foreach (var device in devices)
+                _deviceWatcher?.Stop();
+                _deviceEntries.Clear();
+
+                var selector = HidDevice.GetDeviceSelector(0xFF00, 0x01);
+                var devices = await DeviceInformation.FindAllAsync(selector);
+                var savedId = App.GetSetting("HidDeviceId");
+                foreach (var d in devices.Where(x => x.Name.Contains("Galena")))
                 {
-                    var portName = ExtractPortName(device.Name);
-                    if (!string.IsNullOrEmpty(portName))
-                    {
-                        friendlyNames[portName] = device.Name;
-                        var name = device.Name.ToLowerInvariant();
-                        deviceTypes[portName] = name.Contains("bluetooth") || name.Contains("spp") || name.Contains("hc-0")
-                            ? DeviceType.Bluetooth : DeviceType.Usb;
-                    }
-                }
-            }
-            catch { }
-
-            foreach (var p in portNames.OrderBy(n => n))
-            {
-                DeviceItems.Add(new DeviceItem
-                {
-                    PortName = p,
-                    FriendlyName = friendlyNames.TryGetValue(p, out var fn) ? fn : p,
-                    Type = deviceTypes.TryGetValue(p, out var dt) ? dt : DeviceType.Unknown
-                });
-            }
-
-            foreach (var item in DeviceItems)
-                item.IsConnected = _isConnected && item.PortName == (_serialPort?.PortName ?? "");
-
-            NoDevicesText.Visibility = DeviceItems.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
-
-            TryAutoConnect();
-        }
-
-        private static string ExtractPortName(string deviceName)
-        {
-            var idx = deviceName.LastIndexOf('(');
-            if (idx >= 0)
-            {
-                var end = deviceName.LastIndexOf(')');
-                if (end > idx)
-                {
-                    var inner = deviceName.Substring(idx + 1, end - idx - 1);
-                    if (inner.StartsWith("COM", StringComparison.OrdinalIgnoreCase))
-                        return inner;
-                }
-            }
-            return "";
-        }
-
-        private void StartPollTimer()
-        {
-            _pollTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
-            _pollTimer.Tick += async (_, _) =>
-            {
-                var currentPorts = SerialPort.GetPortNames();
-                var saved = App.GetSetting("ComPort");
-
-                var knownPorts = DeviceItems.Select(d => d.PortName).ToArray();
-                if (!currentPorts.OrderBy(p => p).SequenceEqual(knownPorts.OrderBy(p => p)))
-                    await RefreshDeviceListAsync();
-
-                if (!string.IsNullOrEmpty(saved) && !_isConnected && !_manualDisconnect && currentPorts.Contains(saved))
-                {
-                    var device = DeviceItems.FirstOrDefault(d => d.PortName == saved);
-                    ConnectToPort(saved, device?.FriendlyName ?? "");
-                }
-                else if (_isConnected && _serialPort != null && !currentPorts.Contains(_serialPort.PortName))
-                    DisconnectPort();
-            };
-            _pollTimer.Start();
-        }
-
-        private async void TryAutoConnect()
-        {
-            var saved = App.GetSetting("ComPort");
-            if (!string.IsNullOrEmpty(saved) && SerialPort.GetPortNames().Contains(saved))
-            {
-                var device = DeviceItems.FirstOrDefault(d => d.PortName == saved);
-                ConnectToPort(saved, device?.FriendlyName ?? "");
-            }
-        }
-
-        private void ConnectToPort(string portName, string friendlyName = "")
-        {
-            _manualDisconnect = false;
-            if (string.IsNullOrEmpty(friendlyName))
-            {
-                var device = DeviceItems.FirstOrDefault(d => d.PortName == portName);
-                friendlyName = device?.FriendlyName ?? "";
-            }
-            try
-            {
-                if (_serialPort is { IsOpen: true })
-                {
-                    _serialPort.Close();
-                    _serialPort.Dispose();
-                    _serialPort = null;
+                    var entry = new DeviceEntry { Id = d.Id, DisplayName = d.Name };
+                    _deviceEntries.Add(entry);
+                    if (!string.IsNullOrEmpty(savedId) && d.Id == savedId)
+                        ConnectToHidDevice(d.Id);
                 }
 
-                _serialPort = new SerialPort(portName, 115200, Parity.None, 8, StopBits.One)
+                DeviceListView.ItemsSource = _deviceEntries;
+                UpdateEmptyState();
+
+                _deviceWatcher = DeviceInformation.CreateWatcher(selector);
+                _deviceWatcher.Added += (_, info) =>
                 {
-                    ReadTimeout = 1000,
-                    WriteTimeout = 1000
+                    if (info.Name.Contains("Galena"))
+                        DispatcherQueue.TryEnqueue(async () =>
+                        {
+                            if (_deviceEntries.All(x => x.Id != info.Id))
+                            {
+                                _deviceEntries.Add(new DeviceEntry { Id = info.Id, DisplayName = info.Name });
+                                UpdateEmptyState();
+                            }
+                            if (!NativeMethods.IsValidHandle(_hidReadHandle))
+                            {
+                                await Task.Delay(300);
+                                ConnectToHidDevice(info.Id);
+                            }
+                        });
                 };
-                _serialPort.DataReceived += OnDataReceived;
-                _serialPort.Open();
-
-                _isConnected = true;
-                UpdateStatusUI(true, portName, friendlyName);
-                App.SetSetting("ComPort", portName);
-                App.SetSetting("ComPortFriendlyName", friendlyName);
-                AppendDebugLog("RX", $"Connected to {portName}");
-                UpdateDeviceItemsState();
+                _deviceWatcher.Removed += (_, info) =>
+                {
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        var entry = _deviceEntries.FirstOrDefault(x => x.Id == info.Id);
+                        if (entry != null) _deviceEntries.Remove(entry);
+                        if (info.Id == _connectedDeviceId) DisconnectHidDevice();
+                        UpdateEmptyState();
+                    });
+                };
+                _deviceWatcher.Start();
             }
-            catch (UnauthorizedAccessException)
-            {
-                UpdateStatusUI(false, "");
-            }
-            catch (Exception)
-            {
-                UpdateStatusUI(false, "");
-            }
+            catch { }
         }
 
-        private void DisconnectPort()
+        private void UpdateEmptyState()
+        {
+            EmptyDeviceText.Visibility = _deviceEntries.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        }
+
+        private async void ConnectToHidDevice(string deviceId)
         {
             try
             {
-                if (_serialPort is { IsOpen: true })
+                DisconnectHidDevice();
+
+                _hidReadHandle = NativeMethods.OpenHidDeviceRead(deviceId, out int readErr);
+                _hidWriteHandle = NativeMethods.OpenHidDeviceWrite(deviceId, out int writeErr);
+
+                if (!NativeMethods.IsValidHandle(_hidReadHandle) && !NativeMethods.IsValidHandle(_hidWriteHandle))
                 {
-                    var name = _serialPort.PortName;
-                    _serialPort.Close();
-                    _serialPort.Dispose();
-                    _serialPort = null;
-                    _isConnected = false;
-                    UpdateStatusUI(false, "");
-                    AppendDebugLog("RX", $"Disconnected from {name}");
+                    _hidReadHandle = NativeMethods.OpenHidDeviceReadWrite(deviceId, out int rwErr);
+                    _hidWriteHandle = _hidReadHandle;
+                }
+
+                if (!NativeMethods.IsValidHandle(_hidReadHandle) && !NativeMethods.IsValidHandle(_hidWriteHandle))
+                {
+                    AppendHidEvent($"HID open failed (readErr={readErr}, writeErr={writeErr})");
+                    return;
+                }
+
+                _connectedDeviceId = deviceId;
+                App.SetSetting("HidDeviceId", deviceId);
+                AppendHidEvent("Connected");
+
+                foreach (var e in _deviceEntries) e.IsConnected = (e.Id == deviceId);
+                DeviceListView.ItemsSource = null;
+                DeviceListView.ItemsSource = _deviceEntries;
+
+                if (NativeMethods.IsValidHandle(_hidReadHandle))
+                {
+                    _hidReadCts = new CancellationTokenSource();
+                    _ = Task.Run(() => HidReadLoop(_hidReadHandle, _hidReadCts.Token));
                 }
             }
-            catch { }
-            UpdateDeviceItemsState();
+            catch
+            {
+                AppendHidEvent("Exception connecting to HID device");
+            }
         }
 
-        private void OnDataReceived(object sender, SerialDataReceivedEventArgs e)
+        private void SendOsdState()
         {
-            if (_serialPort is not { IsOpen: true }) return;
             try
             {
-                var data = _serialPort.ReadExisting();
-                _ = DispatcherQueue.TryEnqueue(() =>
-                {
-                    try
-                    {
-                        AppendDebugLog("RX", data.TrimEnd('\r', '\n'));
-                        if (data.Contains("HALO|R+")) OsdService.Instance.SelectNext();
-                        if (data.Contains("HALO|R-")) OsdService.Instance.SelectPrev();
-                        if (data.Contains("HALO|C")) OsdService.Instance.Click();
-                    }
-                    catch { }
-                });
+                if (!NativeMethods.IsValidHandle(_hidWriteHandle)) return;
+                var osdByte = OsdService.Instance.IsVisible ? (byte)1 : (byte)0;
+                bool ok = NativeMethods.SendHidFeatureReport(_hidWriteHandle, 0, new byte[] { osdByte });
+                AppendHidEvent(ok ? $"OSD sent byte={osdByte}" : $"OSD send FAILED (Win32 err={Marshal.GetLastWin32Error()})");
             }
-            catch { }
+            catch (Exception ex) { AppendHidEvent($"OSD send FAILED: {ex.Message}"); }
         }
 
-        private void AppendDebugLog(string direction, string data)
+        private void DisconnectHidDevice()
         {
-            if (string.IsNullOrEmpty(data)) return;
-            var prefix = direction == "TX" ? TxPrefixBox.Text : RxPrefixBox.Text;
-            _debugLog.AppendLine($"{prefix}{data}");
+            try
+            {
+                _hidReadCts?.Cancel();
+                if (_hidReadHandle == _hidWriteHandle)
+                {
+                    NativeMethods.CloseHidDevice(_hidReadHandle);
+                }
+                else
+                {
+                    NativeMethods.CloseHidDevice(_hidReadHandle);
+                    NativeMethods.CloseHidDevice(_hidWriteHandle);
+                }
+                _hidReadHandle = IntPtr.Zero;
+                _hidWriteHandle = IntPtr.Zero;
+                _connectedDeviceId = null;
+            }
+            catch { }
+            AppendHidEvent("Disconnected");
+
+            foreach (var e in _deviceEntries) e.IsConnected = false;
+            DeviceListView.ItemsSource = null;
+            DeviceListView.ItemsSource = _deviceEntries;
+        }
+
+        private void HidReadLoop(IntPtr handle, CancellationToken ct)
+        {
+            ushort inputLen = NativeMethods.GetInputReportByteLength(handle);
+            if (inputLen == 0) inputLen = 9;
+            var buf = new byte[inputLen];
+
+            while (!ct.IsCancellationRequested)
+            {
+                try
+                {
+                    bool ok = NativeMethods.ReadInputReport(handle, buf, (uint)inputLen, out uint bytesRead);
+                    if (!ok || bytesRead < 3)
+                    {
+                        Thread.Sleep(50);
+                        continue;
+                    }
+
+                    var eventType = buf[1];
+                    var eventValue = (sbyte)buf[2];
+
+                    _ = DispatcherQueue.TryEnqueue(() =>
+                    {
+                        ProcessHidEvent(eventType, eventValue);
+                    });
+                }
+                catch (OperationCanceledException) { break; }
+                catch
+                {
+                    Thread.Sleep(200);
+                }
+            }
+        }
+
+        private void ProcessHidEvent(byte eventType, sbyte eventValue)
+        {
+            switch (eventType)
+            {
+                case 1:
+                    _lastBrightness = eventValue;
+                    AppendHidEvent($"BRIGHTNESS {eventValue}%");
+                    OsdService.Instance.UpdateBrightnessPreviewIfShowing(eventValue, _lightBarOn);
+                    break;
+                case 2:
+                    AppendHidEvent(eventValue > 0 ? "ENCODER +1" : "ENCODER -1");
+                    if (OsdService.Instance.IsVisible)
+                    {
+                        if (eventValue > 0) OsdService.Instance.SelectNext();
+                        else OsdService.Instance.SelectPrev();
+                    }
+                    else
+                    {
+                        _lastBrightness = Math.Clamp(_lastBrightness + eventValue * 3, 0, 100);
+                        OsdService.Instance.ShowBrightnessPreview(_lastBrightness, _lightBarOn);
+                    }
+                    break;
+                case 3:
+                    var label = eventValue switch { 0 => "tap", 1 => "press", 2 => "hold", _ => eventValue.ToString() };
+                    AppendHidEvent($"BUTTON {label}");
+                    if (eventValue == 0) OsdService.Instance.Click();
+                    else if (eventValue == 2)
+                    {
+                        _lightBarOn = !_lightBarOn;
+                        OsdService.Instance.ShowBrightnessPreview(_lastBrightness, _lightBarOn);
+                    }
+                    break;
+                case 4:
+                    SendOsdState();
+                    break;
+                case 5:
+                    var ackState = eventValue == 1 ? "Open" : "Closed";
+                    OsdStateText.Text = $"OSD: {ackState}";
+                    OsdStatusIndicator.Fill = eventValue == 1
+                        ? new SolidColorBrush(Microsoft.UI.Colors.LimeGreen)
+                        : new SolidColorBrush(Microsoft.UI.Colors.Gray);
+                    break;
+                case 6:
+                    _lightBarOn = eventValue == 1;
+                    AppendHidEvent(_lightBarOn ? "LIGHT ON" : "LIGHT OFF");
+                    OsdService.Instance.UpdateBrightnessPreviewIfShowing(_lastBrightness, _lightBarOn);
+                    break;
+            }
+        }
+
+        private void AppendHidEvent(string msg)
+        {
+            if (string.IsNullOrEmpty(msg)) return;
+            _debugLog.AppendLine($"[{DateTime.Now:HH:mm:ss}] {msg}");
             DebugLogText.Text = _debugLog.ToString();
             LogScrollView?.ChangeView(0, double.MaxValue, 1);
         }
 
-        private void UpdateStatusUI(bool connected, string portName, string friendlyName = "")
+        private void DeviceListView_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            StatusDot.Fill = connected
-                ? new SolidColorBrush(Color.FromArgb(255, 16, 185, 129))
-                : new SolidColorBrush(Color.FromArgb(255, 128, 128, 128));
-            var display = string.IsNullOrEmpty(friendlyName) ? portName : friendlyName;
-            StatusText.Text = connected ? $"Connected ({display})" : "Disconnected";
-            ConnectButton.Content = connected ? "Disconnect" : "Connect";
-        }
-
-        private void UpdateDeviceItemsState()
-        {
-            var connectedPort = _serialPort?.PortName ?? "";
-            foreach (var item in DeviceItems)
-                item.IsConnected = _isConnected && item.PortName == connectedPort;
-        }
-
-        private async Task ShowDeviceNotAvailableError(string? savedPort)
-        {
-            var friendlyName = App.GetSetting("ComPortFriendlyName");
-            var displayName = !string.IsNullOrEmpty(friendlyName) ? $"{friendlyName} ({savedPort})" : savedPort;
-            var msg = string.IsNullOrEmpty(savedPort)
-                ? "No previously connected device found. Please select a device from the list below."
-                : $"The last connected device ({displayName}) is not currently available. Please check the device and try again.";
-
-            var dialog = new ContentDialog
-            {
-                Title = "Device Unavailable",
-                Content = msg,
-                CloseButtonText = "OK",
-                XamlRoot = AppRoot.XamlRoot
-            };
-            await dialog.ShowAsync();
-        }
-
-        private void ConnectButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_isConnected)
-            {
-                _manualDisconnect = true;
-                DisconnectPort();
-            }
+            if (e.AddedItems.FirstOrDefault() is not DeviceEntry entry) return;
+            if (entry.IsConnected)
+                DisconnectHidDevice();
             else
-            {
-                _manualDisconnect = false;
-                var saved = App.GetSetting("ComPort");
-                if (!string.IsNullOrEmpty(saved) && SerialPort.GetPortNames().Contains(saved))
-                {
-                    var device = DeviceItems.FirstOrDefault(d => d.PortName == saved);
-                    ConnectToPort(saved, device?.FriendlyName ?? "");
-                }
-                else
-                {
-                    _ = ShowDeviceNotAvailableError(saved);
-                }
-            }
-        }
-
-        private void DeviceItemConnect_Click(object sender, RoutedEventArgs e)
-        {
-            if (sender is not Button btn || btn.Tag is not string port) return;
-
-            if (_isConnected && _serialPort?.PortName == port)
-            {
-                _manualDisconnect = true;
-                DisconnectPort();
-            }
-            else
-            {
-                _manualDisconnect = false;
-                var device = DeviceItems.FirstOrDefault(d => d.PortName == port);
-                ConnectToPort(port, device?.FriendlyName ?? "");
-            }
+                ConnectToHidDevice(entry.Id);
         }
 
         private void DebugToggle_Toggled(object sender, RoutedEventArgs e)
@@ -427,24 +419,6 @@ namespace Galena_Action_Ring
         {
             _debugLog.Clear();
             DebugLogText.Text = "";
-        }
-
-        private void SendButton_Click(object sender, RoutedEventArgs e)
-        {
-            if (_serialPort is not { IsOpen: true }) return;
-            var data = SendTextBox.Text;
-            if (string.IsNullOrEmpty(data)) return;
-
-            try
-            {
-                _serialPort.WriteLine(data);
-                AppendDebugLog("TX", data);
-                SendTextBox.Text = "";
-            }
-            catch (Exception ex)
-            {
-                AppendDebugLog("TX", $"Send error: {ex.Message}");
-            }
         }
 
         private void HamburgerButton_Click(object sender, RoutedEventArgs e)
@@ -1491,45 +1465,9 @@ namespace Galena_Action_Ring
         public SolidColorBrush IconBrush { get; set; } = new(Colors.Gray);
     }
 
-    public enum DeviceType { Usb, Bluetooth, Unknown }
-
     public class AppListItem
     {
         public string DisplayName { get; set; } = "";
         public string FullPath { get; set; } = "";
     }
-
-    public class DeviceItem : INotifyPropertyChanged
-    {
-        public string PortName { get; set; } = "";
-        public string FriendlyName { get; set; } = "";
-        public DeviceType Type { get; set; }
-
-        private bool _isConnected;
-        public bool IsConnected
-        {
-            get => _isConnected;
-            set { _isConnected = value; OnPropertyChanged(); OnPropertyChanged(nameof(ButtonText)); OnPropertyChanged(nameof(IconBrush)); }
-        }
-
-        public string ButtonText => IsConnected ? "Disconnect" : "Connect";
-
-        public string IconGlyph => Type switch
-        {
-            DeviceType.Bluetooth => "\uE1A7",
-            DeviceType.Usb => "\uE226",
-            _ => "\uE31E"
-        };
-
-        private static readonly SolidColorBrush ConnectedBrush = new(Color.FromArgb(255, 16, 185, 129));
-        private static readonly SolidColorBrush DisconnectedBrush = new(Color.FromArgb(255, 128, 128, 128));
-
-        public SolidColorBrush IconBrush => IsConnected ? ConnectedBrush : DisconnectedBrush;
-
-        public event PropertyChangedEventHandler? PropertyChanged;
-        private void OnPropertyChanged([CallerMemberName] string? name = null) =>
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(name));
-    }
-
-
 }

@@ -49,5 +49,10 @@
   <Capabilities>
     <rescap:Capability Name="runFullTrust" />
     <systemai:Capability Name="systemAIModels"/>
+    <DeviceCapability Name="humaninterfacedevice">
+      <Device Id="any">
+        <Function Type="usage:FF00 0001"/>
+      </Device>
+    </DeviceCapability>
   </Capabilities>
 </Package>

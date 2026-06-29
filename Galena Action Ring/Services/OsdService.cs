@@ -20,6 +20,8 @@ public class OsdService
     private OsdWindow? _osdWindow;
     private DispatcherTimer? _timeoutTimer;
     private DispatcherTimer _liveStateTimer = null!;
+    private DispatcherTimer? _brightnessPreviewTimer;
+    private bool _brightnessPreviewShowing;
     private int _selectedIndex;
     private bool _isVisible;
     private RingNode? _previousFolderNode;
@@ -28,6 +30,8 @@ public class OsdService
     private int _radialValue = 50;
     private bool _seekMode;
     private readonly Dictionary<string, bool> _toggleStates = new();
+
+    public event Action<bool>? OsdVisibilityChanged;
 
     public RingProfile CurrentProfile { get; internal set; } = new();
 
@@ -64,6 +68,9 @@ public class OsdService
 
         _liveStateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _liveStateTimer.Tick += (_, _) => ApplyToggleStatesToOsd();
+
+        _brightnessPreviewTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
+        _brightnessPreviewTimer.Tick += (_, _) => HideBrightnessPreview();
     }
 
     public void ReloadProfile(string profileName = "Default")
@@ -79,13 +86,15 @@ public class OsdService
     public void Show()
     {
         if (_osdWindow == null) return;
+        _isVisible = true;
+        HideBrightnessPreview();
         _inRadialMode = false;
         if (_seekMode) { _seekMode = false; _osdWindow?.StopSeekLoop(); }
-        NativeMethods.ShowTopmost(_osdWindow);
-        _isVisible = true;
+        NativeMethods.ShowTopmost(_osdWindow!);
+        OsdVisibilityChanged?.Invoke(true);
         _selectedIndex = 0;
-        _osdWindow.SelectOption(0);
-        _osdWindow.ShowMenu();
+        _osdWindow!.SelectOption(0);
+        _osdWindow!.ShowMenu();
         ApplyToggleStatesToOsd();
         _liveStateTimer.Start();
         ResetTimeout();
@@ -98,9 +107,10 @@ public class OsdService
         if (_seekMode) { _seekMode = false; _osdWindow?.StopSeekLoop(); }
         _osdWindow?.HideSubMenuBg();
         _isVisible = false;
+        OsdVisibilityChanged?.Invoke(false);
         _timeoutTimer?.Stop();
         _liveStateTimer?.Stop();
-        _osdWindow.HideMenu(() =>
+        _osdWindow!.HideMenu(() =>
         {
             NativeMethods.HideWindow(_osdWindow);
         });
@@ -130,6 +140,12 @@ public class OsdService
 
     public void Click()
     {
+        if (_brightnessPreviewShowing)
+        {
+            HideBrightnessPreview();
+            return;
+        }
+
         if (!_isVisible)
         {
             if (_previousFolderNode != null)
@@ -482,6 +498,54 @@ public class OsdService
             }
         }
         catch { }
+    }
+
+    public void ShowBrightnessPreview(int percent, bool lightOn)
+    {
+        if (_inRadialMode || _isVisible || _osdWindow == null)
+        {
+            System.Diagnostics.Debug.WriteLine($"[ShowBrightnessPreview] BLOCKED radial={_inRadialMode} visible={_isVisible} win={_osdWindow != null}");
+            return;
+        }
+
+        if (!_brightnessPreviewShowing)
+        {
+            _brightnessPreviewShowing = true;
+            NativeMethods.ShowTopmost(_osdWindow);
+            _osdWindow.ShowRadialProgress("Galena Light Bar", percent);
+            _osdWindow.UpdateRadialStatus(lightOn ? "Turn On" : "Turned Off");
+            System.Diagnostics.Debug.WriteLine($"[ShowBrightnessPreview] SHOW percent={percent} lightOn={lightOn}");
+        }
+        else
+        {
+            _osdWindow.UpdateRadialPercent(percent);
+            _osdWindow.UpdateRadialStatus(lightOn ? "Turn On" : "Turned Off");
+            System.Diagnostics.Debug.WriteLine($"[ShowBrightnessPreview] UPDATE percent={percent} lightOn={lightOn}");
+        }
+
+        _brightnessPreviewTimer?.Stop();
+        _brightnessPreviewTimer?.Start();
+    }
+
+    public void UpdateBrightnessPreviewIfShowing(int percent, bool lightOn)
+    {
+        if (!_brightnessPreviewShowing) return;
+        _osdWindow?.UpdateRadialPercent(percent);
+        _osdWindow?.UpdateRadialStatus(lightOn ? "Turn On" : "Turned Off");
+        _brightnessPreviewTimer?.Stop();
+        _brightnessPreviewTimer?.Start();
+    }
+
+    private void HideBrightnessPreview()
+    {
+        if (!_brightnessPreviewShowing) return;
+        _brightnessPreviewShowing = false;
+        _brightnessPreviewTimer?.Stop();
+        _osdWindow?.HideRadialLayer();
+        if (!_isVisible)
+        {
+            NativeMethods.HideWindow(_osdWindow!);
+        }
     }
 
     private void ResetTimeout()

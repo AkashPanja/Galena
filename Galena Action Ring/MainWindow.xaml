@@ -426,136 +426,98 @@
                         <!-- ==================== DEVICES ==================== -->
                         <ScrollViewer x:Name="BluetoothScrollViewer">
                             <Grid x:Name="BluetoothPage" Visibility="Visible">
-                                <Grid.RowDefinitions>
+                            <Grid.RowDefinitions>
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="*" />
                             </Grid.RowDefinitions>
 
                             <!-- Device Section Header -->
                             <TextBlock Grid.Row="0" Text="Device" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8" />
 
-                            <!-- Device Info Card -->
-                            <Border Grid.Row="1" Style="{StaticResource SettingsCardStyle}" Padding="20">
+                            <!-- Device List -->
+                            <Border Grid.Row="1" Style="{StaticResource SettingsCardStyle}" Padding="4">
                                 <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <StackPanel Grid.Column="0" Spacing="8">
-                                        <TextBlock x:Name="DeviceNameText" Text="Connected Action Ring Device" FontSize="18" FontWeight="SemiBold" />
-                                        <Grid>
-                                            <Grid.ColumnDefinitions>
-                                                <ColumnDefinition Width="Auto" />
-                                                <ColumnDefinition Width="*" />
-                                            </Grid.ColumnDefinitions>
-                                            <Ellipse x:Name="StatusDot" Width="12" Height="12" Fill="Gray" VerticalAlignment="Center" />
-                                            <TextBlock x:Name="StatusText" Grid.Column="1" Text="Disconnected" Margin="10,0,0,0" VerticalAlignment="Center" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                        </Grid>
-                                    </StackPanel>
-                                    <Button x:Name="ConnectButton" Grid.Column="1" Content="Connect" VerticalAlignment="Center" MinWidth="100" Click="ConnectButton_Click" />
-                                </Grid>
-                            </Border>
-
-                            <!-- Available Devices Section Header -->
-                            <TextBlock Grid.Row="2" Text="Available devices" FontSize="16" FontWeight="SemiBold" Margin="0,16,0,8" />
-
-                            <!-- Available Devices Card -->
-                            <Border Grid.Row="3" Style="{StaticResource SettingsCardStyle}">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-                                    <ItemsControl x:Name="DeviceListControl" Grid.Row="0">
-                                        <ItemsControl.ItemTemplate>
+                                    <ListView x:Name="DeviceListView" SelectionMode="Single"
+                                              SelectionChanged="DeviceListView_SelectionChanged"
+                                              ScrollViewer.VerticalScrollBarVisibility="Auto">
+                                        <ListView.ItemTemplate>
                                             <DataTemplate>
-                                                <Grid Margin="0,4">
+                                                <Grid Padding="12,8" Margin="0,2">
                                                     <Grid.ColumnDefinitions>
-                                                        <ColumnDefinition Width="*" />
                                                         <ColumnDefinition Width="Auto" />
+                                                        <ColumnDefinition Width="*" />
                                                     </Grid.ColumnDefinitions>
-                                                    <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="8">
-                                                        <FontIcon FontFamily="Assets/MaterialSymbols.ttf#Material Symbols Outlined" Glyph="{Binding IconGlyph}" Foreground="{Binding IconBrush}" FontSize="16" VerticalAlignment="Center" />
-                                                        <StackPanel>
-                                                            <TextBlock Text="{Binding FriendlyName}" FontSize="14" />
-                                                            <TextBlock Text="{Binding PortName}" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                                        </StackPanel>
+                                                    <Ellipse Width="12" Height="12"
+                                                             Fill="{Binding StatusColor}"
+                                                             VerticalAlignment="Center" />
+                                                    <StackPanel Grid.Column="1" Margin="12,0,0,0" VerticalAlignment="Center">
+                                                        <TextBlock Text="{Binding DisplayName}" FontSize="14" FontWeight="SemiBold" />
                                                     </StackPanel>
-                                                    <Button Grid.Column="1" Content="{Binding ButtonText}" Tag="{Binding PortName}" Click="DeviceItemConnect_Click"
-                                                            Width="90" HorizontalAlignment="Stretch" />
                                                 </Grid>
                                             </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                    <TextBlock x:Name="NoDevicesText" Grid.Row="1" Text="No devices found" Foreground="{ThemeResource TextFillColorSecondaryBrush}" Margin="0,16,0,0" Visibility="Collapsed" />
+                                        </ListView.ItemTemplate>
+                                    </ListView>
+                                    <TextBlock x:Name="EmptyDeviceText" Text="Connect your Galena Action Ring"
+                                               FontSize="14" Foreground="{ThemeResource TextFillColorSecondaryBrush}"
+                                               HorizontalAlignment="Center" VerticalAlignment="Center"
+                                               Visibility="Collapsed" />
                                 </Grid>
                             </Border>
 
-                            <!-- Debug Section Header -->
-                            <TextBlock Grid.Row="4" Text="Debug" FontSize="16" FontWeight="SemiBold" Margin="0,16,0,8" />
+                            <!-- Debug Section -->
+                            <StackPanel Grid.Row="2" Margin="0,16,0,0">
+                                <!-- Debug Section Header -->
+                                <TextBlock Text="Debug" FontSize="16" FontWeight="SemiBold" Margin="0,0,0,8" />
 
-                            <!-- Debug Toggle Card -->
-                            <Border x:Name="DebugToggleCard" Grid.Row="5" Style="{StaticResource SettingsCardStyle}">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="Auto" />
-                                    </Grid.ColumnDefinitions>
-                                    <TextBlock Grid.Column="0" Text="Debug" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" />
-                                    <ToggleSwitch x:Name="DebugToggle" Grid.Column="1" Toggled="DebugToggle_Toggled" />
-                                </Grid>
-                            </Border>
-
-                            <!-- Debug Content Card (separate, collapsible) -->
-                            <Border x:Name="DebugContentCard" Grid.Row="6" Style="{StaticResource SettingsCardStyle}" Margin="0,0,0,24" Visibility="Collapsed">
-                                <Grid>
-                                    <Grid.RowDefinitions>
-                                        <RowDefinition Height="Auto" />
-                                        <RowDefinition Height="*" />
-                                        <RowDefinition Height="Auto" />
-                                    </Grid.RowDefinitions>
-
-                                    <!-- Prefix Row -->
-                                    <Grid Grid.Row="0">
-                                        <Grid.ColumnDefinitions>
-                                            <ColumnDefinition Width="*" />
-                                            <ColumnDefinition Width="*" />
-                                        </Grid.ColumnDefinitions>
-                                        <StackPanel Grid.Column="0">
-                                            <TextBlock Text="TX prefix" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                            <TextBox x:Name="TxPrefixBox" Text="→ " FontSize="12" />
-                                        </StackPanel>
-                                        <StackPanel Grid.Column="1" Margin="8,0,0,0">
-                                            <TextBlock Text="RX prefix" FontSize="12" Foreground="{ThemeResource TextFillColorSecondaryBrush}" />
-                                            <TextBox x:Name="RxPrefixBox" Text="← " FontSize="12" />
-                                        </StackPanel>
-                                    </Grid>
-
-                                    <!-- Log Area -->
-                                    <Border Grid.Row="1" Margin="0,8,0,0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" MinHeight="150" MaxHeight="400">
-                                        <ScrollViewer x:Name="LogScrollView">
-                                            <TextBlock x:Name="DebugLogText" FontFamily="Consolas" FontSize="12" TextWrapping="Wrap" Padding="8" IsTextSelectionEnabled="True" />
-                                        </ScrollViewer>
-                                    </Border>
-
-                                    <!-- Send Row -->
-                                    <Grid Grid.Row="2" Margin="0,8,0,0">
+                                <!-- OSD Status Card -->
+                                <Border Style="{StaticResource SettingsCardStyle}" Padding="20" Margin="0,0,0,0">
+                                    <Grid>
                                         <Grid.ColumnDefinitions>
                                             <ColumnDefinition Width="Auto" />
                                             <ColumnDefinition Width="*" />
+                                        </Grid.ColumnDefinitions>
+                                        <Ellipse x:Name="OsdStatusIndicator" Grid.Column="0" Width="12" Height="12"
+                                                 Fill="Gray" VerticalAlignment="Center" />
+                                        <TextBlock x:Name="OsdStateText" Grid.Column="1" Text="OSD: --"
+                                                   FontSize="14" FontWeight="SemiBold"
+                                                   VerticalAlignment="Center" Margin="12,0,0,0" />
+                                    </Grid>
+                                </Border>
+
+                                <!-- Debug Toggle Card -->
+                                <Border x:Name="DebugToggleCard" Style="{StaticResource SettingsCardStyle}" Margin="0,8,0,0">
+                                    <Grid>
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="*" />
                                             <ColumnDefinition Width="Auto" />
                                         </Grid.ColumnDefinitions>
-                                        <Button Grid.Column="0" Content="Clear" Click="ClearLogButton_Click" Margin="0,0,8,0" />
-                                        <TextBox x:Name="SendTextBox" Grid.Column="1" PlaceholderText="Data to send" />
-                                        <Button x:Name="SendButton" Grid.Column="2" Content="Send" Margin="8,0,0,0" Click="SendButton_Click" />
+                                        <TextBlock Grid.Column="0" Text="Debug Log" FontSize="20" FontWeight="SemiBold" VerticalAlignment="Center" />
+                                        <ToggleSwitch x:Name="DebugToggle" Grid.Column="1" Toggled="DebugToggle_Toggled" />
                                     </Grid>
-                                </Grid>
-                            </Border>
+                                </Border>
+
+                                <!-- Debug Content Card (separate, collapsible) -->
+                                <Border x:Name="DebugContentCard" Style="{StaticResource SettingsCardStyle}" Margin="0,0,0,24">
+                                    <Grid>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="*" />
+                                            <RowDefinition Height="Auto" />
+                                        </Grid.RowDefinitions>
+
+                                        <!-- Log Area -->
+                                        <Border Grid.Row="0" Background="{ThemeResource CardBackgroundFillColorDefaultBrush}" MinHeight="150" MaxHeight="400">
+                                            <ScrollViewer x:Name="LogScrollView">
+                                                <TextBlock x:Name="DebugLogText" FontFamily="Consolas" FontSize="12" TextWrapping="Wrap" Padding="8" IsTextSelectionEnabled="True" />
+                                            </ScrollViewer>
+                                        </Border>
+
+                                        <!-- Clear Row -->
+                                        <Button Grid.Row="1" Content="Clear" Click="ClearLogButton_Click" Margin="0,8,0,0" HorizontalAlignment="Left" />
+                                    </Grid>
+                                </Border>
+                            </StackPanel>
                             </Grid>
                         </ScrollViewer>
 
