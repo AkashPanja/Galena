@@ -477,26 +477,12 @@ public class OsdService
 
     private static void SetBrightness(bool increase)
     {
-        try
-        {
-            var scope = new ManagementScope(@"root\wmi");
-            scope.Connect();
-            using var mos = new ManagementObjectSearcher(
-                scope,
-                new SelectQuery("SELECT * FROM WmiMonitorBrightnessMethods"));
-            foreach (ManagementBaseObject mbo in mos.Get())
-            {
-                using var mo = (ManagementObject)mbo;
-                var inParams = mo.GetMethodParameters("WmiSetBrightness");
-                if (inParams != null)
-                {
-                    inParams["Brightness"] = increase ? 100u : 0u;
-                    inParams["Timeout"] = 0u;
-                    mo.InvokeMethod("WmiSetBrightness", inParams, null);
-                }
-            }
-        }
-        catch (Exception ex) { Debug.WriteLine($"[OsdService] SetBrightness failed: {ex.Message}"); }
+        int current = GetSystemBrightness();
+        int step = 10;
+        int target = increase
+            ? Math.Min(current + step, 100)
+            : Math.Max(current - step, 0);
+        SetSystemBrightness(target);
     }
 
     public void ShowBrightnessPreview(int percent, bool lightOn)

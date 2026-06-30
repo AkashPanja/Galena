@@ -24,6 +24,7 @@ using Windows.Storage.Pickers;
 using Windows.UI;
 using Microsoft.Win32;
 using WinRT.Interop;
+using GalenaActionRing.Services;
 
 namespace GalenaActionRing
 {
@@ -51,42 +52,9 @@ namespace GalenaActionRing
         private volatile bool _lightBarOn = true;
 
 
-        // Canvas editor state
-        private List<RingNode> _canvasNodes = new();
-        private readonly List<Grid> _canvasElements = new();
-        private int _selectedCanvasIndex = -1;
-        private bool _isDragging;
-        private int _dragIndex = -1;
-        private double _dragStartAngle;
-
-        // Sub-menu navigation
-        private readonly Stack<(List<RingNode> Nodes, string Title, List<RingNode> ParentNodes)> _canvasStack = new();
-        private List<RingNode> _activeNodes = new();
-
-        // App profiles
-        private readonly List<RingProfile> _appProfiles = new();
-        private int _selectedProfileIndex;
-        private RingProfile? _editingCopy;
+        private readonly ProfileManager _profileManager = new();
+        private CanvasEditor _canvasEditor = null!;
         private bool _suppressTabChange;
-        private bool _suppressColorChange;
-        private bool _suppressActionTypeChange;
-
-        // Canvas sizing
-        private const double ActualOsdSize = 400;
-        private const double CanvasViewport = 400;
-        private double Scale => CanvasViewport / ActualOsdSize;
-
-        // Brushes (synced with OsdWindow styling)
-        private static SolidColorBrush InactiveFill = new(Color.FromArgb(128, 255, 255, 255));
-        private static SolidColorBrush InactiveStroke = new(Color.FromArgb(255, 102, 102, 102));
-        private static SolidColorBrush InactiveForeground = new(Color.FromArgb(255, 0, 0, 0));
-        private static SolidColorBrush ActiveFill = new(Color.FromArgb(255, 0, 0, 0));
-        private static SolidColorBrush ActiveStroke = new(Color.FromArgb(255, 255, 255, 255));
-        private static SolidColorBrush ActiveForeground = new(Color.FromArgb(255, 255, 255, 255));
-        private static readonly SolidColorBrush NodeLabelBrush = new(Colors.Black);
-        private static readonly SolidColorBrush CenterFill = new(Color.FromArgb(128, 255, 255, 255));
-        private bool _colorsExpanded = false;
-        private ActionTypeItem? _lastActionTypeItem;
 
         public MainWindow()
         {
@@ -113,12 +81,42 @@ namespace GalenaActionRing
 
             SetMinWindowSize();
 
-            InitAppProfiles();
-            LoadCurrentProfile();
+            _canvasEditor = new CanvasEditor(new CanvasEditorDependencies
+            {
+                RingCanvas = RingCanvas,
+                NodeEditDefaultText = NodeEditDefaultText,
+                NodeEditPanel = NodeEditPanel,
+                PropGlyphPreview = PropGlyphPreview,
+                PropLabelDisplay = PropLabelDisplay,
+                PropActionDisplay = PropActionDisplay,
+                PropLabelBox = PropLabelBox,
+                PropUrlBox = PropUrlBox,
+                PropAppPathBox = PropAppPathBox,
+                PropAppPathSection = PropAppPathSection,
+                PropActionTypeBox = PropActionTypeBox,
+                EditSubmenuBtn = EditSubmenuBtn,
+                CanvasBackBtn = CanvasBackBtn,
+                CanvasTitle = CanvasTitle,
+                IconSection = IconSection,
+                IconGallery = IconGallery,
+                IconSearchBox = IconSearchBox,
+                ColorBody = ColorBody,
+                ColorChevron = ColorChevron,
+                PrimaryColorPicker = PrimaryColorPicker,
+                SecondaryPreview = SecondaryPreview,
+                AppRoot = AppRoot,
+            })
+            {
+                ProfileManager = _profileManager,
+            };
+
+            _profileManager.ProfilesChanged += OnProfilesChanged;
+            _profileManager.ProfileLoaded += OnProfileLoaded;
+            _profileManager.Init();
+            _profileManager.Load();
             _ = FindHidDevicesAsync();
 
-            PropActionTypeBox.ItemTemplate = (DataTemplate)AppRoot.Resources["ActionTypeItemTemplate"];
-            PopulateActionTypeBox();
+            _canvasEditor.PopulateActionTypeBox((DataTemplate)AppRoot.Resources["ActionTypeItemTemplate"]);
 
             if (!StartupService.IsFirstRunDone())
                 _ = ShowFirstRunPromptAsync();
@@ -463,17 +461,7 @@ namespace GalenaActionRing
 
             await StartupService.SetEnabledAsync(false);
 
-            _appProfiles.Clear();
-            foreach (var name in ProfileService.ListProfiles())
-                ProfileService.DeleteProfile(name);
-
-            var def = ProfileService.CreateDefault();
-            ProfileService.SaveProfile(def);
-            _appProfiles.Add(def);
-            _selectedProfileIndex = 0;
-            RefreshAppProfileTabs();
-            LoadCurrentProfile();
-            PopulateIconGallery();
+            _profileManager.Reset();
 
             try
             {
@@ -483,7 +471,7 @@ namespace GalenaActionRing
             }
             catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[MainWindow] ResetAppButton: {ex.Message}"); }
 
-            OsdService.Instance.ReloadProfile("Default");
+            _profileManager.Load();
             NavView.SelectedItem = NavConfigure;
             StartupToggle.IsOn = false;
             _ = ShowFirstRunPromptAsync();
@@ -509,60 +497,15 @@ namespace GalenaActionRing
             StartupService.MarkFirstRunDone();
         }
 
-        #region Canvas Editor
+        #region Profile & Canvas
 
-        private void InitAppProfiles()
-        {
-            _appProfiles.Clear();
-            var existing = ProfileService.ListProfiles();
-            foreach (var name in existing)
-            {
-                var p = ProfileService.LoadProfile(name) ?? new RingProfile { Name = name };
-                // Auto-repair: root Nodes should contain at least one Folder or Group category node.
-                // If every node is Individual/category 0 and all are simple action types, the profile
-                // likely has sub-menu children stored as root (old save bug). Reset to default.
-                if (p.Nodes.Count > 0 && p.Nodes.All(n => n.Category == ActionCategory.Individual &&
-                    n.ActionType is ActionType.MediaPlayPause or ActionType.MediaNext or
-                    ActionType.MediaPrevious or ActionType.MediaSeekForward or ActionType.MediaSeekBackward))
-                {
-                    var fresh = ProfileService.CreateDefault();
-                    fresh.Name = p.Name;
-                    fresh.ProcessName = p.ProcessName;
-                    p = fresh;
-                }
-                // Migrate old playlist_play glyph to autoplay for Folder nodes
-                MigrateFolderGlyphs(p.Nodes);
-                _appProfiles.Add(p);
-            }
-            if (_appProfiles.Count == 0)
-            {
-                var def = ProfileService.CreateDefault();
-                ProfileService.SaveProfile(def);
-                _appProfiles.Add(def);
-            }
-            _selectedProfileIndex = 0;
-            RefreshAppProfileTabs();
-            PopulateIconGallery();
-        }
-
-        private static void MigrateFolderGlyphs(List<RingNode> nodes)
-        {
-            foreach (var node in nodes)
-            {
-                if (node.ActionType == ActionType.Folder && node.Glyph == "\uE05F")
-                    node.Glyph = "\uF6B5";
-                if (node.Children != null)
-                    MigrateFolderGlyphs(node.Children);
-            }
-        }
-
-        private void RefreshAppProfileTabs()
+        private void OnProfilesChanged()
         {
             _suppressTabChange = true;
             AppProfileTabs.Items.Clear();
-            for (int i = 0; i < _appProfiles.Count; i++)
+            for (int i = 0; i < _profileManager.Profiles.Count; i++)
             {
-                var p = _appProfiles[i];
+                var p = _profileManager.Profiles[i];
                 var tab = new ProfileTabItem
                 {
                     Profile = p,
@@ -574,59 +517,25 @@ namespace GalenaActionRing
                 };
                 AppProfileTabs.Items.Add(tab);
             }
-            if (_selectedProfileIndex >= 0 && _selectedProfileIndex < AppProfileTabs.Items.Count)
-                AppProfileTabs.SelectedIndex = _selectedProfileIndex;
+            if (_profileManager.SelectedIndex >= 0 && _profileManager.SelectedIndex < AppProfileTabs.Items.Count)
+                AppProfileTabs.SelectedIndex = _profileManager.SelectedIndex;
             _suppressTabChange = false;
+            PopulateIconGallery();
+        }
+
+        private void OnProfileLoaded(RingProfile profile)
+        {
+            OsdService.Instance.CurrentProfile = profile;
+            var editingNodes = _profileManager.EditingCopy?.Nodes ?? profile.Nodes;
+            _canvasEditor.LoadProfile(editingNodes, profile);
+            OsdService.Instance.ReloadProfile(profile.Name);
         }
 
         private void AppProfileTabs_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
             if (_suppressTabChange) return;
             if (AppProfileTabs.SelectedIndex < 0) return;
-            _selectedProfileIndex = AppProfileTabs.SelectedIndex;
-            LoadCurrentProfile();
-        }
-
-
-        private void LoadCurrentProfile()
-        {
-            if (_selectedProfileIndex < 0 || _selectedProfileIndex >= _appProfiles.Count) return;
-            var profile = _appProfiles[_selectedProfileIndex];
-            _editingCopy = profile.DeepCopy();
-            OsdService.Instance.CurrentProfile = profile;
-            _canvasStack.Clear();
-            _activeNodes = _editingCopy.Nodes;
-            _canvasNodes = _activeNodes;
-            CanvasTitle.Text = profile.Name;
-            CanvasBackBtn.Visibility = Visibility.Collapsed;
-            _selectedCanvasIndex = -1;
-            SelectProfileColors();
-            RenderCanvas();
-            OsdService.Instance.ReloadProfile(profile.Name);
-        }
-
-        private void SaveCurrentProfile()
-        {
-            if (_selectedProfileIndex < 0 || _selectedProfileIndex >= _appProfiles.Count) return;
-            var profile = _appProfiles[_selectedProfileIndex];
-            if (_editingCopy == null) return;
-
-            var duplicate = _appProfiles
-                .Select((p, i) => (p, i))
-                .FirstOrDefault(x => x.i != _selectedProfileIndex &&
-                                     string.Equals(x.p.Name, profile.Name, StringComparison.OrdinalIgnoreCase));
-            if (duplicate.p != null)
-            {
-                _ = ShowErrorDialog($"A ring named \"{profile.Name}\" already exists. Choose a different name.");
-                return;
-            }
-
-            // Copy edited data back to the original profile
-            profile.Nodes = _editingCopy.Nodes.ConvertAll(n => n.DeepCopy());
-            profile.Radius = _editingCopy.Radius;
-
-            ProfileService.SaveProfile(profile);
-            OsdService.Instance.ReloadProfile(profile.Name);
+            _profileManager.SelectIndex(AppProfileTabs.SelectedIndex);
         }
 
         private async Task ShowErrorDialog(string message)
@@ -671,37 +580,24 @@ namespace GalenaActionRing
                 return;
             }
 
-            if (_appProfiles.Any(p => string.Equals(p.Name, ringName, StringComparison.OrdinalIgnoreCase)))
+            if (_profileManager.Add(ringName) == null)
             {
                 await ShowErrorDialog($"A ring named \"{ringName}\" already exists. Choose a different name.");
                 return;
             }
 
-            var template = ProfileService.CreateDefault();
-            var newProfile = new RingProfile
-            {
-                Name = ringName,
-                Radius = template.Radius,
-                PrimaryColor = template.PrimaryColor,
-                SecondaryColor = template.SecondaryColor,
-                Nodes = template.Nodes.ConvertAll(n => n.DeepCopy())
-            };
-            ProfileService.SaveProfile(newProfile);
-            _appProfiles.Add(newProfile);
-            _selectedProfileIndex = _appProfiles.Count - 1;
-            RefreshAppProfileTabs();
-            LoadCurrentProfile();
+            _profileManager.Load();
         }
 
         private async void DeleteRingBtn_Click(object sender, RoutedEventArgs e)
         {
-            if (_appProfiles.Count <= 1)
+            if (!_profileManager.CanDelete)
             {
                 await ShowErrorDialog("You must have at least one ring. Cannot delete the last ring.");
                 return;
             }
 
-            var profile = _appProfiles[_selectedProfileIndex];
+            var profile = _profileManager.Profiles[_profileManager.SelectedIndex];
             var confirm = new ContentDialog
             {
                 Title = "Delete Ring",
@@ -715,17 +611,13 @@ namespace GalenaActionRing
             var result = await confirm.ShowAsync();
             if (result != ContentDialogResult.Primary) return;
 
-            ProfileService.DeleteProfile(profile.Name);
-            _appProfiles.RemoveAt(_selectedProfileIndex);
-            _selectedProfileIndex = Math.Max(0, _selectedProfileIndex - 1);
-            RefreshAppProfileTabs();
-            LoadCurrentProfile();
+            _profileManager.Delete();
+            _profileManager.Load();
         }
 
         private async void RenameRingBtn_Click(object sender, RoutedEventArgs e)
         {
-            if (_selectedProfileIndex < 0 || _selectedProfileIndex >= _appProfiles.Count) return;
-            var profile = _appProfiles[_selectedProfileIndex];
+            var profile = _profileManager.Profiles[_profileManager.SelectedIndex];
 
             var nameBox = new TextBox { Text = profile.Name, Margin = new Thickness(0, 8, 0, 0) };
 
@@ -749,687 +641,110 @@ namespace GalenaActionRing
             if (result != ContentDialogResult.Primary) return;
 
             var newName = nameBox.Text.Trim();
-            if (string.IsNullOrWhiteSpace(newName))
+            var error = _profileManager.Rename(newName);
+            if (error != null)
             {
-                await ShowErrorDialog("Ring name cannot be empty.");
+                await ShowErrorDialog(error);
                 return;
             }
 
-            if (_appProfiles.Any(p => p != profile && string.Equals(p.Name, newName, StringComparison.OrdinalIgnoreCase)))
-            {
-                await ShowErrorDialog($"A ring named \"{newName}\" already exists. Choose a different name.");
-                return;
-            }
-
-            ProfileService.DeleteProfile(profile.Name);
-            profile.Name = newName;
-            ProfileService.SaveProfile(profile);
-            RefreshAppProfileTabs();
-            CanvasTitle.Text = profile.Name;
+            CanvasTitle.Text = newName;
         }
 
-        // --- Canvas Rendering ---
-        private void RenderCanvas()
-        {
-            RingCanvas.Children.Clear();
-            _canvasElements.Clear();
-            var count = _canvasNodes.Count;
+        #region Canvas Delegates
 
-            var radius = 120.0 * Scale;
-            var circleSize = 64.0 * Scale;
-            var fontSize = 28.0 * Scale;
-            var cx = CanvasViewport / 2;
-            var cy = CanvasViewport / 2;
-
-            if (count > 0)
-            {
-                var step = 360.0 / count;
-
-                for (int i = 0; i < count; i++)
-                {
-                    var angle = i * step * Math.PI / 180;
-                    var x = cx + radius * Math.Sin(angle);
-                    var y = cy - radius * Math.Cos(angle);
-
-                    var grid = new Grid { Width = circleSize, Height = circleSize };
-                    Canvas.SetLeft(grid, x - circleSize / 2);
-                    Canvas.SetTop(grid, y - circleSize / 2);
-
-                    var isSelected = i == _selectedCanvasIndex;
-                    var ellipse = new Ellipse
-                    {
-                        Width = circleSize,
-                        Height = circleSize,
-                        Fill = isSelected ? ActiveFill : InactiveFill,
-                        Stroke = isSelected ? ActiveStroke : null,
-                        StrokeThickness = isSelected ? 2 : 0,
-                    };
-                    grid.Children.Add(ellipse);
-
-                    var icon = new FontIcon
-                    {
-                        FontFamily = new FontFamily(MaterialIcons.FontFamilyName),
-                        Glyph = _canvasNodes[i].Glyph,
-                        FontSize = fontSize,
-                        Foreground = isSelected ? ActiveForeground : InactiveForeground,
-                    };
-                    grid.Children.Add(icon);
-                    RingCanvas.Children.Add(grid);
-                    _canvasElements.Add(grid);
-                }
-            }
-
-            var ccs = 24.0 * Scale;
-            var cg = new Grid { Width = ccs, Height = ccs };
-            Canvas.SetLeft(cg, cx - ccs / 2);
-            Canvas.SetTop(cg, cy - ccs / 2);
-            cg.Children.Add(new Ellipse { Width = ccs, Height = ccs, Fill = CenterFill, Stroke = InactiveStroke, StrokeThickness = 1 });
-            cg.Children.Add(new FontIcon
-            {
-                FontFamily = new FontFamily(MaterialIcons.FontFamilyName),
-                Glyph = _canvasStack.Count > 0 ? "\uE5C4" : "\uE5CD",
-                FontSize = 10,
-                Foreground = InactiveForeground,
-            });
-            RingCanvas.Children.Add(cg);
-        }
-
-        private int HitTestNode(Windows.Foundation.Point position)
-        {
-            for (int i = 0; i < _canvasElements.Count; i++)
-            {
-                var el = _canvasElements[i];
-                var left = Canvas.GetLeft(el);
-                var top = Canvas.GetTop(el);
-                if (position.X >= left && position.X <= left + el.Width &&
-                    position.Y >= top && position.Y <= top + el.Height)
-                    return i;
-            }
-            return -1;
-        }
-
-        private bool IsHitCenterButton(Windows.Foundation.Point position)
-        {
-            var cx = CanvasViewport / 2;
-            var cy = CanvasViewport / 2;
-            var halfSize = 12.0 * Scale; // 24 / 2
-            return position.X >= cx - halfSize && position.X <= cx + halfSize &&
-                   position.Y >= cy - halfSize && position.Y <= cy + halfSize;
-        }
-
-        // --- Pointer Handlers ---
         private void RingCanvas_PointerPressed(object sender, PointerRoutedEventArgs e)
         {
             var pos = e.GetCurrentPoint(RingCanvas).Position;
-            var hitIndex = HitTestNode(pos);
-
-            if (hitIndex >= 0)
-            {
-                _selectedCanvasIndex = hitIndex;
-                _isDragging = true;
-                _dragIndex = hitIndex;
-                var cx = CanvasViewport / 2;
-                var cy = CanvasViewport / 2;
-                _dragStartAngle = Math.Atan2(pos.X - cx, cy - pos.Y);
-                RenderCanvas();
-                ShowNodeProperties(_canvasNodes[hitIndex]);
-            }
-            else if (_canvasStack.Count > 0 && IsHitCenterButton(pos))
-            {
-                CanvasBackBtn_Click(sender, new RoutedEventArgs());
-                return;
-            }
-            else
-            {
-                _selectedCanvasIndex = -1;
-                HideNodeProperties();
-                RenderCanvas();
-            }
-            RingCanvas.CapturePointer(e.Pointer);
+            _canvasEditor.PointerPressed(pos, e);
         }
 
         private void RingCanvas_PointerMoved(object sender, PointerRoutedEventArgs e)
         {
-            if (!_isDragging || _dragIndex < 0 || _canvasNodes.Count < 2) return;
             var pos = e.GetCurrentPoint(RingCanvas).Position;
-            var cx = CanvasViewport / 2;
-            var cy = CanvasViewport / 2;
-            var currentAngle = Math.Atan2(pos.X - cx, cy - pos.Y);
-
-            var count = _canvasNodes.Count;
-            var step = 360.0 / count;
-            var angleDeg = ((currentAngle * 180 / Math.PI) + 360) % 360;
-            var nearestIndex = (int)Math.Round(angleDeg / step) % count;
-
-            if (nearestIndex != _dragIndex)
-            {
-                var temp = _canvasNodes[_dragIndex];
-                _canvasNodes.RemoveAt(_dragIndex);
-                _canvasNodes.Insert(nearestIndex, temp);
-                _dragIndex = nearestIndex;
-                _selectedCanvasIndex = nearestIndex;
-                RenderCanvas();
-                ShowNodeProperties(_canvasNodes[nearestIndex]);
-            }
+            _canvasEditor.PointerMoved(pos);
         }
 
         private void RingCanvas_PointerReleased(object sender, PointerRoutedEventArgs e)
         {
-            _isDragging = false;
-            _dragIndex = -1;
-            RingCanvas.ReleasePointerCapture(e.Pointer);
+            _canvasEditor.PointerReleased(e);
         }
 
         private void RingCanvas_PointerCanceled(object sender, PointerRoutedEventArgs e)
         {
-            _isDragging = false;
-            _dragIndex = -1;
-        }
-
-        // --- Node Properties ---
-        private void ShowNodeProperties(RingNode node)
-        {
-            NodeEditDefaultText.Visibility = Visibility.Collapsed;
-            NodeEditPanel.Visibility = Visibility.Visible;
-            CollapseColors();
-
-            PropGlyphPreview.FontFamily = new FontFamily(MaterialIcons.FontFamilyName);
-            PropGlyphPreview.Glyph = node.Glyph;
-            PropLabelDisplay.Text = node.Label;
-            PropActionDisplay.Text = FormatActionTypeName(node.ActionType);
-            PropLabelBox.Text = node.Label;
-
-            // Show/hide conditional fields
-            PropUrlBox.Visibility = node.ActionType == ActionType.OpenUrl ? Visibility.Visible : Visibility.Collapsed;
-            if (node.ActionType == ActionType.OpenUrl)
-                PropUrlBox.Text = node.ActionData;
-
-            PropAppPathSection.Visibility = node.ActionType == ActionType.LaunchApp ? Visibility.Visible : Visibility.Collapsed;
-            if (node.ActionType == ActionType.LaunchApp)
-                PropAppPathBox.Text = node.ActionData;
-
-            EditSubmenuBtn.Visibility = node.ActionType == ActionType.Folder
-                ? Visibility.Visible : Visibility.Collapsed;
-
-            // Show icon gallery for non-toggle nodes (load items source only when first shown)
-            var showIconGallery = !IsToggleType(node.ActionType);
-            IconSection.Visibility = showIconGallery ? Visibility.Visible : Visibility.Collapsed;
-            if (showIconGallery) EnsureIconGalleryLoaded();
-
-            // Select current ActionType
-            _suppressActionTypeChange = true;
-            foreach (ActionTypeItem ati in PropActionTypeBox.Items)
-            {
-                if (ati.Type == node.ActionType)
-                {
-                    PropActionTypeBox.SelectedItem = ati;
-                    _lastActionTypeItem = ati;
-                    break;
-                }
-            }
-            _suppressActionTypeChange = false;
-        }
-
-        private void PopulateActionTypeBox()
-        {
-            var items = new List<ActionTypeItem>();
-
-            void AddItem(ActionType at, string name, string glyph) =>
-                items.Add(new ActionTypeItem { Type = at, Name = name, Glyph = glyph });
-
-            void AddSeparator() =>
-                items.Add(new ActionTypeItem { IsSeparator = true });
-
-            AddSeparator();
-            AddItem(ActionType.VolumeControl, "Volume Control", "\uE050");
-            AddItem(ActionType.BrightnessControl, "Brightness Control", "\uE3AB");
-
-            AddSeparator();
-            AddItem(ActionType.Folder, "Playback Control", "\uF6B5");
-
-            AddSeparator();
-            AddItem(ActionType.MediaPlayPause, "Play / Pause", "\uE037");
-            AddItem(ActionType.MediaNext, "Next Track", "\uE044");
-            AddItem(ActionType.MediaPrevious, "Previous Track", "\uE045");
-            AddItem(ActionType.MediaSeekForward, "Seek Forward", "\uEAC9");
-            AddItem(ActionType.MediaSeekBackward, "Seek Backward", "\uEAC3");
-
-            AddSeparator();
-            AddItem(ActionType.VolumeUp, "Volume Up", "\uE050");
-            AddItem(ActionType.VolumeDown, "Volume Down", "\uE04D");
-            AddItem(ActionType.MuteToggle, "Mute Toggle", "\uE710");
-
-            AddSeparator();
-            AddItem(ActionType.BrightnessUp, "Brightness Up", "\uE3AC");
-            AddItem(ActionType.BrightnessDown, "Brightness Down", "\uE3FA");
-
-            AddSeparator();
-            AddItem(ActionType.LaunchApp, "Launch App", "\uEF40");
-            AddItem(ActionType.OpenUrl, "Open URL", "\uE250");
-
-            AddSeparator();
-            AddItem(ActionType.CloseOsd, "Close OSD", "\uE5CD");
-            AddItem(ActionType.ToggleNightLight, "Night Light Toggle", "\uF159");
-            AddItem(ActionType.TextExpansion, "Text Expansion", "\uE14F");
-
-            AddSeparator();
-            AddItem(ActionType.None, "None", "\uF08C");
-
-            foreach (var item in items)
-                PropActionTypeBox.Items.Add(item);
-        }
-
-        private string FormatActionTypeName(ActionType at)
-        {
-            return at switch
-            {
-                ActionType.Folder => "Playback Control",
-                ActionType.LaunchApp => "Launch App",
-                ActionType.OpenUrl => "Open URL",
-                ActionType.VolumeUp => "Volume Up",
-                ActionType.VolumeDown => "Volume Down",
-                ActionType.MuteToggle => "Mute Toggle",
-                ActionType.BrightnessUp => "Brightness Up",
-                ActionType.BrightnessDown => "Brightness Down",
-                ActionType.MediaPlayPause => "Play / Pause",
-                ActionType.MediaNext => "Next Track",
-                ActionType.MediaPrevious => "Previous Track",
-                ActionType.MediaSeekForward => "Seek Forward",
-                ActionType.MediaSeekBackward => "Seek Backward",
-                ActionType.TextExpansion => "Text Expansion",
-                ActionType.CloseOsd => "Close OSD",
-                ActionType.ToggleNightLight => "Night Light Toggle",
-                ActionType.VolumeControl => "Volume Control",
-                ActionType.BrightnessControl => "Brightness Control",
-                ActionType.None => "None",
-                _ => at.ToString()
-            };
-        }
-
-        private static bool IsToggleType(ActionType type) => type switch
-        {
-            ActionType.MuteToggle => true,
-            ActionType.MediaPlayPause => true,
-            ActionType.ToggleNightLight => true,
-            _ => false
-        };
-
-        private void HideNodeProperties()
-        {
-            NodeEditPanel.Visibility = Visibility.Collapsed;
-            NodeEditDefaultText.Visibility = Visibility.Visible;
-            _selectedCanvasIndex = -1;
-            RenderCanvas();
+            _canvasEditor.PointerCanceled();
         }
 
         private void PropLabelBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            if (_selectedCanvasIndex < 0 || _selectedCanvasIndex >= _canvasNodes.Count) return;
-            _canvasNodes[_selectedCanvasIndex].Label = PropLabelBox.Text;
-            PropLabelDisplay.Text = PropLabelBox.Text;
-            RenderCanvas();
+            _canvasEditor.PropLabelChanged();
         }
 
         private void PropActionTypeBox_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            try
-            {
-                if (_suppressActionTypeChange) return;
-                if (_selectedCanvasIndex < 0 || _selectedCanvasIndex >= _canvasNodes.Count) return;
-                if (PropActionTypeBox.SelectedItem is not ActionTypeItem selected) return;
-                if (selected.IsSeparator)
-                {
-                    if (_lastActionTypeItem != null)
-                        PropActionTypeBox.SelectedItem = _lastActionTypeItem;
-                    return;
-                }
-                _lastActionTypeItem = selected;
-                var newType = selected.Type ?? ActionType.None;
-
-                var node = _canvasNodes[_selectedCanvasIndex];
-                node.ActionType = newType;
-                node.Category = GetCategoryForType(newType);
-
-                var (defaultGlyph, defaultLabel) = GetDefaultsForAction(newType);
-                node.Glyph = defaultGlyph;
-                node.Label = defaultLabel;
-                PropLabelBox.Text = defaultLabel;
-                PropLabelDisplay.Text = defaultLabel;
-                PropGlyphPreview.Glyph = defaultGlyph;
-                node.ActionData = newType switch
-                {
-                    ActionType.LaunchApp => "calc",
-                    ActionType.OpenUrl => "",
-                    ActionType.TextExpansion => "",
-                    _ => ""
-                };
-                PropActionDisplay.Text = FormatActionTypeName(newType);
-
-                PropUrlBox.Visibility = newType == ActionType.OpenUrl ? Visibility.Visible : Visibility.Collapsed;
-                if (newType == ActionType.OpenUrl)
-                    PropUrlBox.Text = node.ActionData;
-
-                PropAppPathSection.Visibility = newType == ActionType.LaunchApp ? Visibility.Visible : Visibility.Collapsed;
-                if (newType == ActionType.LaunchApp)
-                    PropAppPathBox.Text = node.ActionData;
-
-                var showIcon = !IsToggleType(newType);
-                IconSection.Visibility = showIcon ? Visibility.Visible : Visibility.Collapsed;
-                if (showIcon) EnsureIconGalleryLoaded();
-
-                EditSubmenuBtn.Visibility = newType == ActionType.Folder
-                    ? Visibility.Visible : Visibility.Collapsed;
-                RenderCanvas();
-            }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[MainWindow] PropActionTypeBox: {ex.Message}"); }
+            _canvasEditor.PropActionTypeChanged();
         }
 
         private void NodeEditSaveBtn_Click(object sender, RoutedEventArgs e)
         {
-            SaveCurrentProfile();
-            OsdService.Instance.ReloadProfile(OsdService.Instance.CurrentProfile.Name);
+            var error = _profileManager.Save();
+            if (error != null)
+                _ = ShowErrorDialog(error);
+            else
+                OsdService.Instance.ReloadProfile(OsdService.Instance.CurrentProfile.Name);
         }
 
-        // --- Sub-menu Navigation ---
         private void EditSubmenuBtn_Click(object sender, RoutedEventArgs e)
         {
-            if (_selectedCanvasIndex < 0 || _selectedCanvasIndex >= _canvasNodes.Count) return;
-            var node = _canvasNodes[_selectedCanvasIndex];
-            if (node.ActionType != ActionType.Folder) return;
-            if (node.Children == null) node.Children = new List<RingNode>();
-
-            _canvasStack.Push((_canvasNodes, CanvasTitle.Text, _activeNodes));
-            _activeNodes = node.Children;
-            _canvasNodes = _activeNodes;
-            CanvasTitle.Text = node.Label;
-            CanvasBackBtn.Visibility = Visibility.Visible;
-            _selectedCanvasIndex = -1;
-            HideNodeProperties();
-            RenderCanvas();
+            _canvasEditor.EnterSubmenu();
         }
 
         private void CanvasBackBtn_Click(object sender, RoutedEventArgs e)
         {
-            if (_canvasStack.Count == 0) return;
-            var (nodes, title, parentNodes) = _canvasStack.Pop();
-            _activeNodes = parentNodes;
-            _canvasNodes = _activeNodes;
-            CanvasTitle.Text = title;
-            CanvasBackBtn.Visibility = _canvasStack.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-            _selectedCanvasIndex = -1;
-            HideNodeProperties();
-            RenderCanvas();
+            _canvasEditor.Back();
         }
 
         private void AddActionToRing(string glyph, ActionType type, string label)
         {
-            var (defaultGlyph, defaultLabel) = GetDefaultsForAction(type);
-            var newNode = new RingNode
-            {
-                Glyph = !string.IsNullOrEmpty(glyph) ? glyph : defaultGlyph,
-                Label = !string.IsNullOrEmpty(label) ? label : defaultLabel,
-                ActionType = type,
-                Category = GetCategoryForType(type),
-                ActionData = type switch
-                {
-                    ActionType.OpenUrl => "",
-                    ActionType.Folder => "",
-                    _ => ""
-                },
-            };
-            if (type == ActionType.Folder)
-                newNode.Children = new List<RingNode>();
-
-            _activeNodes.Add(newNode);
-            _selectedCanvasIndex = _activeNodes.Count - 1;
-            RenderCanvas();
-            ShowNodeProperties(newNode);
+            _canvasEditor.AddNode(glyph, type, label);
         }
-
-        private static ActionCategory GetCategoryForType(ActionType type) => type switch
-        {
-            ActionType.VolumeControl or ActionType.BrightnessControl => ActionCategory.Group,
-            ActionType.Folder => ActionCategory.Folder,
-            _ => ActionCategory.Individual
-        };
-
-        private static (string glyph, string label) GetDefaultsForAction(ActionType type) => type switch
-        {
-            ActionType.VolumeUp => ("\uE050", "Volume Up"),
-            ActionType.VolumeDown => ("\uE04D", "Volume Down"),
-            ActionType.MuteToggle => ("\uE710", "Mute"),
-            ActionType.VolumeControl => ("\uE050", "Volume"),
-            ActionType.BrightnessUp => ("\uE1AC", "Brightness Up"),
-            ActionType.BrightnessDown => ("\uE1AD", "Brightness Down"),
-            ActionType.BrightnessControl => ("\uE1AC", "Brightness"),
-            ActionType.MediaPlayPause => ("\uEF6A", "Play"),
-            ActionType.MediaNext => ("\uE044", "Next"),
-            ActionType.MediaPrevious => ("\uE045", "Prev"),
-            ActionType.MediaSeekForward => ("\uEAC9", "Seek"),
-            ActionType.MediaSeekBackward => ("\uE020", "Rewind"),
-            ActionType.Folder => ("\uF6B5", "Playback Control"),
-            ActionType.LaunchApp => ("\uEA5F", "App"),
-            ActionType.OpenUrl => ("\uE250", "Website"),
-            ActionType.TextExpansion => ("\uE86F", "Type"),
-            ActionType.ToggleNightLight => ("\uF03D", "Night Light"),
-            ActionType.CloseOsd => ("\uE5CD", "Close"),
-            _ => ("\uE8B8", "Action"),
-        };
-
-        #endregion
-
-        #region Color & Icon Picker
-
-        private bool _iconGalleryLoaded;
 
         private void PopulateIconGallery()
         {
-            _iconGalleryLoaded = false;
-            IconGallery.ItemsSource = null;
-        }
-
-        private void EnsureIconGalleryLoaded()
-        {
-            if (_iconGalleryLoaded) return;
-            _iconGalleryLoaded = true;
-            SearchIcons();
-        }
-
-        private void SearchIcons()
-        {
-            var search = IconSearchBox.Text?.Trim().ToLowerInvariant() ?? "";
-            IconGallery.ItemsSource = string.IsNullOrEmpty(search)
-                ? MaterialIcons.AllIcons.Take(200).ToList()
-                : MaterialIcons.AllIcons
-                    .Where(icon => icon.DisplayName.ToLowerInvariant().Contains(search) ||
-                                  icon.Name.ToLowerInvariant().Contains(search))
-                    .Take(500).ToList();
+            _canvasEditor.PopulateIconGallery();
         }
 
         private void IconSearchBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            if (!_iconGalleryLoaded)
-            {
-                if (IconSection.Visibility != Visibility.Visible) return;
-                _iconGalleryLoaded = true;
-            }
-            SearchIcons();
+            _canvasEditor.IconSearchChanged();
         }
 
         private void IconGallery_SelectionChanged(object sender, SelectionChangedEventArgs e)
         {
-            if (_selectedCanvasIndex < 0 || _selectedCanvasIndex >= _canvasNodes.Count) return;
-            if (IconGallery.SelectedItem is not MaterialIconInfo icon) return;
-            var node = _canvasNodes[_selectedCanvasIndex];
-            node.Glyph = icon.Glyph;
-            PropGlyphPreview.Glyph = icon.Glyph;
-            RenderCanvas();
-        }
-
-        private static string ColorToHex(Color c)
-        {
-            return $"#{c.A:X2}{c.R:X2}{c.G:X2}{c.B:X2}";
-        }
-
-        private static Color ComplementaryColor(Color c)
-        {
-            var r = (byte)(255 - c.R);
-            var g = (byte)(255 - c.G);
-            var b = (byte)(255 - c.B);
-            // Blend with white for a softer complement
-            return Color.FromArgb(255,
-                (byte)((r + 255) / 2),
-                (byte)((g + 255) / 2),
-                (byte)((b + 255) / 2));
+            _canvasEditor.IconSelected();
         }
 
         private void PrimaryColorPicker_ColorChanged(ColorPicker sender, ColorChangedEventArgs args)
         {
-            if (_suppressColorChange || _selectedProfileIndex < 0 || _selectedProfileIndex >= _appProfiles.Count) return;
-            var profile = _appProfiles[_selectedProfileIndex];
-            var primary = args.NewColor;
-            var secondary = ComplementaryColor(primary);
-
-            SecondaryPreview.Background = new SolidColorBrush(secondary);
-
-            profile.PrimaryColor = ColorToHex(primary);
-            profile.SecondaryColor = ColorToHex(secondary);
-            SaveCurrentProfile();
-            SyncCanvasColors(primary, secondary);
-            RenderCanvas();
-            OsdService.Instance.ReloadProfile(profile.Name);
-        }
-
-        private void SyncCanvasColors(Color primary, Color secondary)
-        {
-            ActiveFill = new SolidColorBrush(primary);
-            ActiveForeground = (byte)((primary.R * 299 + primary.G * 587 + primary.B * 114) / 1000) > 128
-                ? new SolidColorBrush(Color.FromArgb(255, 0, 0, 0))
-                : new SolidColorBrush(Color.FromArgb(255, 255, 255, 255));
-            ActiveStroke = new SolidColorBrush(Color.FromArgb(255,
-                (byte)(255 - primary.R), (byte)(255 - primary.G), (byte)(255 - primary.B)));
-
-            InactiveFill = new SolidColorBrush(secondary);
-            var bgLum = (byte)((secondary.R * 299 + secondary.G * 587 + secondary.B * 114) / 1000);
-            InactiveForeground = bgLum > 128
-                ? new SolidColorBrush(Color.FromArgb(255, 0, 0, 0))
-                : new SolidColorBrush(Color.FromArgb(255, 255, 255, 255));
-            InactiveStroke = new SolidColorBrush(Color.FromArgb(255, 102, 102, 102));
-        }
-
-        private void CollapseColors(bool animate = false)
-        {
-            if (!_colorsExpanded) return;
-            if (animate)
-            {
-                var currentHeight = ColorBody.ActualHeight;
-                if (currentHeight <= 0) currentHeight = 300;
-                ColorBody.Height = currentHeight;
-                var sb = new Storyboard();
-                var da = new DoubleAnimation
-                {
-                    From = currentHeight,
-                    To = 0,
-                    Duration = TimeSpan.FromMilliseconds(250),
-                    EnableDependentAnimation = true
-                };
-                da.Completed += (_, _) => ColorBody.Height = 0;
-                Storyboard.SetTarget(da, ColorBody);
-                Storyboard.SetTargetProperty(da, "Height");
-                sb.Children.Add(da);
-                sb.Begin();
-            }
-            else
-            {
-                ColorBody.Height = 0;
-            }
-            ColorChevron.Glyph = "\uE316";
-            _colorsExpanded = false;
-        }
-
-        private void ExpandColors()
-        {
-            if (_colorsExpanded) return;
-            ColorBody.Height = double.NaN;
-            ColorBody.UpdateLayout();
-            var targetHeight = ColorBody.ActualHeight;
-            if (targetHeight <= 0) targetHeight = 300;
-            ColorBody.Height = 0;
-            var sb = new Storyboard();
-            var da = new DoubleAnimation
-            {
-                From = 0,
-                To = targetHeight,
-                Duration = TimeSpan.FromMilliseconds(250),
-                EnableDependentAnimation = true
-            };
-            da.Completed += (_, _) => ColorBody.Height = double.NaN;
-            Storyboard.SetTarget(da, ColorBody);
-            Storyboard.SetTargetProperty(da, "Height");
-            sb.Children.Add(da);
-            sb.Begin();
-            ColorChevron.Glyph = "\uE313";
-            _colorsExpanded = true;
+            var profile = _profileManager.Profiles.ElementAtOrDefault(_profileManager.SelectedIndex);
+            _canvasEditor.PrimaryColorChanged(args.NewColor, profile);
+            if (profile != null)
+                OsdService.Instance.ReloadProfile(profile.Name);
         }
 
         private void ColorToggleBtn_PointerPressed(object sender, PointerRoutedEventArgs e)
         {
-            if (_colorsExpanded)
-                CollapseColors(animate: true);
-            else
-                ExpandColors();
+            _canvasEditor.ToggleColors();
         }
-
-        private void SelectProfileColors()
-        {
-            if (_selectedProfileIndex < 0 || _selectedProfileIndex >= _appProfiles.Count) return;
-            var profile = _appProfiles[_selectedProfileIndex];
-            _suppressColorChange = true;
-            if (TryParseColor(profile.PrimaryColor, out var primary))
-            {
-                PrimaryColorPicker.Color = primary;
-            }
-            if (TryParseColor(profile.SecondaryColor, out var secondary))
-                SecondaryPreview.Background = new SolidColorBrush(secondary);
-            if (TryParseColor(profile.PrimaryColor, out var primColor) &&
-                TryParseColor(profile.SecondaryColor, out var secColor))
-                SyncCanvasColors(primColor, secColor);
-            _suppressColorChange = false;
-        }
-
-        private static bool TryParseColor(string hex, out Color color)
-        {
-            color = Colors.Transparent;
-            try
-            {
-                if (hex.Length >= 7 && hex[0] == '#')
-                {
-                    var a = hex.Length >= 9 ? System.Convert.ToByte(hex.Substring(1, 2), 16) : (byte)255;
-                    var r = System.Convert.ToByte(hex.Substring(hex.Length - 6, 2), 16);
-                    var g = System.Convert.ToByte(hex.Substring(hex.Length - 4, 2), 16);
-                    var b = System.Convert.ToByte(hex.Substring(hex.Length - 2, 2), 16);
-                    color = Color.FromArgb(a, r, g, b);
-                    return true;
-                }
-            }
-            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[MainWindow] TryParseColor: {ex.Message}"); }
-            return false;
-        }
-
-        #endregion
-
-        #region URL & App Picker
 
         private void PropUrlBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            if (_selectedCanvasIndex < 0 || _selectedCanvasIndex >= _canvasNodes.Count) return;
-            _canvasNodes[_selectedCanvasIndex].ActionData = PropUrlBox.Text;
+            _canvasEditor.PropUrlChanged();
         }
 
         private void PropAppPathBox_TextChanged(object sender, TextChangedEventArgs e)
         {
-            if (_selectedCanvasIndex < 0 || _selectedCanvasIndex >= _canvasNodes.Count) return;
-            _canvasNodes[_selectedCanvasIndex].ActionData = PropAppPathBox.Text;
+            _canvasEditor.PropAppPathChanged();
         }
 
         private async void PropChangeAppBtn_Click(object sender, RoutedEventArgs e)
@@ -1450,10 +765,11 @@ namespace GalenaActionRing
             if (file != null)
             {
                 PropAppPathBox.Text = file.Path;
-                if (_selectedCanvasIndex >= 0 && _selectedCanvasIndex < _canvasNodes.Count)
-                    _canvasNodes[_selectedCanvasIndex].ActionData = file.Path;
+                _canvasEditor.SetAppPathOnSelected(file.Path);
             }
         }
+
+        #endregion
 
         #endregion
 
