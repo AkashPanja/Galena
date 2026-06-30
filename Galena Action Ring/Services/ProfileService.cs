@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Text.Json;
 
-namespace Galena_Action_Ring;
+namespace GalenaActionRing;
 
 public class ProfileService
 {

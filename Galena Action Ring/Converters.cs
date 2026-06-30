@@ -1,8 +1,8 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Data;
 using System;
 
-namespace Galena_Action_Ring;
+namespace GalenaActionRing;
 
 public class BoolToVisibilityConverter : IValueConverter
 {

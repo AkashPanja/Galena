@@ -1,16 +1,15 @@
-using Microsoft.UI.Xaml;
-using System;
+﻿using System;
 using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
 using Microsoft.Win32;
-
+using Microsoft.UI.Xaml;
 using System.Management;
 using System.Runtime.InteropServices;
 using System.Threading.Tasks;
 using Windows.Media.Control;
 
-namespace Galena_Action_Ring;
+namespace GalenaActionRing;
 
 public class OsdService
 {
@@ -57,7 +56,7 @@ public class OsdService
         _osdWindow.ApplyProfileColors(CurrentProfile.PrimaryColor, CurrentProfile.SecondaryColor);
         _osdWindow.LoadNodes(CurrentProfile.Nodes, CurrentProfile.Radius);
         InitPlayPauseIcons();
-        ApplyToggleStatesToOsd();
+        _ = ApplyToggleStatesToOsdAsync();
         NativeMethods.SetWindowSize(_osdWindow);
         NativeMethods.SetWindowPosition(_osdWindow);
         _osdWindow.Activate();
@@ -67,7 +66,7 @@ public class OsdService
         _timeoutTimer.Tick += (_, _) => Hide();
 
         _liveStateTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        _liveStateTimer.Tick += (_, _) => ApplyToggleStatesToOsd();
+        _liveStateTimer.Tick += (_, _) => { _ = ApplyToggleStatesToOsdAsync(); };
 
         _brightnessPreviewTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(2) };
         _brightnessPreviewTimer.Tick += (_, _) => HideBrightnessPreview();
@@ -80,7 +79,7 @@ public class OsdService
         _osdWindow.ApplyProfileColors(CurrentProfile.PrimaryColor, CurrentProfile.SecondaryColor);
         _osdWindow.LoadNodes(CurrentProfile.Nodes, CurrentProfile.Radius);
         InitPlayPauseIcons();
-        ApplyToggleStatesToOsd();
+        _ = ApplyToggleStatesToOsdAsync();
     }
 
     public void Show()
@@ -95,7 +94,7 @@ public class OsdService
         _selectedIndex = 0;
         _osdWindow!.SelectOption(0);
         _osdWindow!.ShowMenu();
-        ApplyToggleStatesToOsd();
+        _ = ApplyToggleStatesToOsdAsync();
         _liveStateTimer.Start();
         ResetTimeout();
     }
@@ -157,7 +156,7 @@ public class OsdService
                 _parentNodes = null;
                 _osdWindow?.SetCenterGlyph("\uE5CD");
                 _osdWindow?.HideSubMenuBg();
-                ApplyToggleStatesToOsd();
+                _ = ApplyToggleStatesToOsdAsync();
             }
             Show();
             return;
@@ -246,7 +245,7 @@ public class OsdService
                     {
                         keybd_event(0xB3, 0, 0, 0);
                         keybd_event(0xB3, 0, 2, 0);
-                        // Toggle icon predictively — media app hasn't processed the key yet
+                        // Toggle icon predictively â€” media app hasn't processed the key yet
                         var nextGlyph = playStatus == GlobalSystemMediaTransportControlsSessionPlaybackStatus.Playing
                             ? "\uE037" : "\uE034";
                         _osdWindow?.UpdateNodeIcon(nodeIndex, nextGlyph);
@@ -351,7 +350,7 @@ public class OsdService
                     break;
             }
         }
-        catch { }
+        catch (Exception ex) { Debug.WriteLine($"[OsdService] ExecuteAction failed: {ex.Message}"); }
     }
 
     private void EnterSubMenu(RingNode folderNode)
@@ -366,7 +365,7 @@ public class OsdService
         InitPlayPauseIcons();
         _osdWindow?.SetCenterGlyph("\uE5C4");
         _osdWindow?.ShowSubMenuBg();
-        ApplyToggleStatesToOsd();
+        _ = ApplyToggleStatesToOsdAsync();
         Show();
     }
 
@@ -383,7 +382,7 @@ public class OsdService
         InitPlayPauseIcons();
         _osdWindow?.SetCenterGlyph("\uE5CD");
         _osdWindow?.HideSubMenuBg();
-        ApplyToggleStatesToOsd();
+        _ = ApplyToggleStatesToOsdAsync();
         Show();
     }
 
@@ -449,7 +448,7 @@ public class OsdService
                 return Convert.ToInt32(mo["CurrentBrightness"]);
             }
         }
-        catch { }
+        catch (Exception ex) { Debug.WriteLine($"[OsdService] GetSystemBrightness failed: {ex.Message}"); }
         return 50;
     }
 
@@ -473,7 +472,7 @@ public class OsdService
                 }
             }
         }
-        catch { }
+        catch (Exception ex) { Debug.WriteLine($"[OsdService] SetSystemBrightness failed: {ex.Message}"); }
     }
 
     private static void SetBrightness(bool increase)
@@ -497,7 +496,7 @@ public class OsdService
                 }
             }
         }
-        catch { }
+        catch (Exception ex) { Debug.WriteLine($"[OsdService] SetBrightness failed: {ex.Message}"); }
     }
 
     public void ShowBrightnessPreview(int percent, bool lightOn)
@@ -574,7 +573,7 @@ public class OsdService
             var info = session.GetPlaybackInfo();
             return info?.PlaybackStatus;
         }
-        catch { return null; }
+        catch (Exception ex) { Debug.WriteLine($"[OsdService] GetMediaStatusAsync failed: {ex.Message}"); return null; }
     }
 
     private static bool GetNightLightEnabled()
@@ -586,10 +585,10 @@ public class OsdService
             var data = key?.GetValue("Data") as byte[];
             return data != null && data.Length > 18 && data[18] == 0x15;
         }
-        catch { return false; }
+        catch (Exception ex) { Debug.WriteLine($"[OsdService] GetNightLightEnabled failed: {ex.Message}"); return false; }
     }
 
-    private async void ApplyToggleStatesToOsd()
+    private async Task ApplyToggleStatesToOsdAsync()
     {
         if (_osdWindow == null) return;
         for (int i = 0; i < CurrentProfile.Nodes.Count; i++)
@@ -630,7 +629,7 @@ public class OsdService
         }
     }
 
-    private async void UpdateMediaPlayPauseIcon(int nodeIndex)
+    private async Task UpdateMediaPlayPauseIconAsync(int nodeIndex)
     {
         var status = await GetMediaStatusAsync();
         string glyph;
@@ -655,7 +654,7 @@ public class OsdService
         }
         else if (node.ActionType == ActionType.MediaPlayPause)
         {
-            UpdateMediaPlayPauseIcon(nodeIndex);
+            _ = UpdateMediaPlayPauseIconAsync(nodeIndex);
         }
         else if (node.ActionType == ActionType.ToggleNightLight)
         {

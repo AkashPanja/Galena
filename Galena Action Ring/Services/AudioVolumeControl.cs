@@ -1,7 +1,8 @@
-using System;
+﻿using System;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 
-namespace Galena_Action_Ring;
+namespace GalenaActionRing;
 
 public static class AudioVolumeControl
 {
@@ -26,7 +27,7 @@ public static class AudioVolumeControl
             Marshal.Release(epvPtr);
             return epv;
         }
-        catch { return null; }
+        catch (Exception ex) { Debug.WriteLine($"[Audio] GetEndpoint failed: {ex.Message}"); return null; }
     }
 
     public static int GetVolume()
@@ -39,7 +40,7 @@ public static class AudioVolumeControl
             if (hr < 0) return 50;
             return (int)Math.Round(level * 100);
         }
-        catch { return 50; }
+        catch (Exception ex) { Debug.WriteLine($"[Audio] GetVolume failed: {ex.Message}"); return 50; }
         finally { Marshal.ReleaseComObject(epv); }
     }
 
@@ -52,7 +53,7 @@ public static class AudioVolumeControl
             float level = Math.Clamp(percent, 0, 100) / 100f;
             epv.SetMasterVolumeLevelScalar(level, IntPtr.Zero);
         }
-        catch { }
+        catch (Exception ex) { Debug.WriteLine($"[Audio] SetVolume failed: {ex.Message}"); }
         finally { Marshal.ReleaseComObject(epv); }
     }
 
@@ -66,7 +67,7 @@ public static class AudioVolumeControl
             if (hr < 0) return false;
             return mute != 0;
         }
-        catch { return false; }
+        catch (Exception ex) { Debug.WriteLine($"[Audio] GetMute failed: {ex.Message}"); return false; }
         finally { Marshal.ReleaseComObject(epv); }
     }
 
@@ -78,7 +79,7 @@ public static class AudioVolumeControl
         {
             epv.SetMute(mute ? 1 : 0, IntPtr.Zero);
         }
-        catch { }
+        catch (Exception ex) { Debug.WriteLine($"[Audio] SetMute failed: {ex.Message}"); }
         finally { Marshal.ReleaseComObject(epv); }
     }
 

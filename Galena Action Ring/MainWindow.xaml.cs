@@ -1,4 +1,4 @@
-using Microsoft.UI;
+﻿using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
@@ -25,7 +25,7 @@ using Windows.UI;
 using Microsoft.Win32;
 using WinRT.Interop;
 
-namespace Galena_Action_Ring
+namespace GalenaActionRing
 {
     internal class DeviceEntry
     {
@@ -47,8 +47,8 @@ namespace Galena_Action_Ring
         private DeviceWatcher? _deviceWatcher;
         private readonly StringBuilder _debugLog = new();
         private readonly ObservableCollection<DeviceEntry> _deviceEntries = new();
-        private int _lastBrightness = 100;
-        private bool _lightBarOn = true;
+        private volatile int _lastBrightness = 100;
+        private volatile bool _lightBarOn = true;
 
 
         // Canvas editor state
@@ -210,7 +210,7 @@ namespace Galena_Action_Ring
                 };
                 _deviceWatcher.Start();
             }
-            catch { }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[HID] FindHidDevicesAsync failed: {ex.Message}"); }
         }
 
         private void UpdateEmptyState()
@@ -253,9 +253,9 @@ namespace Galena_Action_Ring
                     _ = Task.Run(() => HidReadLoop(_hidReadHandle, _hidReadCts.Token));
                 }
             }
-            catch
+            catch (Exception ex)
             {
-                AppendHidEvent("Exception connecting to HID device");
+                AppendHidEvent($"Exception connecting to HID device: {ex.Message}");
             }
         }
 
@@ -276,6 +276,7 @@ namespace Galena_Action_Ring
             try
             {
                 _hidReadCts?.Cancel();
+                NativeMethods.CancelRead(_hidReadHandle);
                 if (_hidReadHandle == _hidWriteHandle)
                 {
                     NativeMethods.CloseHidDevice(_hidReadHandle);
@@ -289,7 +290,7 @@ namespace Galena_Action_Ring
                 _hidWriteHandle = IntPtr.Zero;
                 _connectedDeviceId = null;
             }
-            catch { }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[HID] Disconnect error: {ex.Message}"); }
             AppendHidEvent("Disconnected");
 
             foreach (var e in _deviceEntries) e.IsConnected = false;
@@ -323,8 +324,9 @@ namespace Galena_Action_Ring
                     });
                 }
                 catch (OperationCanceledException) { break; }
-                catch
+                catch (Exception ex)
                 {
+                    System.Diagnostics.Debug.WriteLine($"[HID] ReadLoop error: {ex.Message}");
                     Thread.Sleep(200);
                 }
             }
@@ -479,7 +481,7 @@ namespace Galena_Action_Ring
                     @"Software\GalenaActionRing", true);
                 key?.DeleteValue("FirstRunDone", false);
             }
-            catch { }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[MainWindow] ResetAppButton: {ex.Message}"); }
 
             OsdService.Instance.ReloadProfile("Default");
             NavView.SelectedItem = NavConfigure;
@@ -1119,7 +1121,7 @@ namespace Galena_Action_Ring
                     ? Visibility.Visible : Visibility.Collapsed;
                 RenderCanvas();
             }
-            catch { }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[MainWindow] PropActionTypeBox: {ex.Message}"); }
         }
 
         private void NodeEditSaveBtn_Click(object sender, RoutedEventArgs e)
@@ -1410,7 +1412,7 @@ namespace Galena_Action_Ring
                     return true;
                 }
             }
-            catch { }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine($"[MainWindow] TryParseColor: {ex.Message}"); }
             return false;
         }
 

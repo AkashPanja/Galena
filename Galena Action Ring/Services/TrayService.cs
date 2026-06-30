@@ -1,9 +1,9 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using System;
 using System.Runtime.InteropServices;
 using WinRT.Interop;
 
-namespace Galena_Action_Ring;
+namespace GalenaActionRing;
 
 internal class TrayService : IDisposable
 {

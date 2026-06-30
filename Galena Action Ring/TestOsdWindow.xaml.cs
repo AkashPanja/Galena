@@ -1,4 +1,4 @@
-using Microsoft.UI.Xaml;
+﻿using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Media;
 using Microsoft.UI.Xaml.Media.Animation;
@@ -6,7 +6,7 @@ using System;
 using System.Runtime.InteropServices;
 using WinRT.Interop;
 
-namespace Galena_Action_Ring;
+namespace GalenaActionRing;
 
 public sealed partial class TestOsdWindow : Window
 {
@@ -68,7 +68,7 @@ public sealed partial class TestOsdWindow : Window
         var exStyle = (int)GetWindowLongPtr(_hwnd, GWL_EXSTYLE);
         SetWindowLongPtr(_hwnd, GWL_EXSTYLE, (IntPtr)(exStyle | WS_EX_LAYERED | WS_EX_TRANSPARENT | WS_EX_TOPMOST | WS_EX_TOOLWINDOW));
 
-        // Color-key: magenta → transparent
+        // Color-key: magenta â†’ transparent
         SetLayeredWindowAttributes(_hwnd, 0x00FF00FF, 255, LWA_COLORKEY);
 
         // Win11 corner fix

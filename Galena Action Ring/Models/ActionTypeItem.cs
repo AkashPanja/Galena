@@ -1,4 +1,4 @@
-namespace Galena_Action_Ring;
+﻿namespace GalenaActionRing;
 
 public class ActionTypeItem
 {

@@ -3,7 +3,7 @@ using System;
 
 using Microsoft.Win32;
 
-namespace Galena_Action_Ring;
+namespace GalenaActionRing;
 
 public partial class App : Application
 {

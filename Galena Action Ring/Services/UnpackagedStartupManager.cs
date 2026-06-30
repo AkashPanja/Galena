@@ -1,8 +1,8 @@
-using System;
+﻿using System;
 using System.IO;
 using Microsoft.Win32.TaskScheduler;
 
-namespace Galena_Action_Ring;
+namespace GalenaActionRing;
 
 public static class UnpackagedStartupManager
 {

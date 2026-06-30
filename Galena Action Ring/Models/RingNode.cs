@@ -1,9 +1,9 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.ComponentModel;
 using System.Runtime.CompilerServices;
 using System.Text.Json.Serialization;
 
-namespace Galena_Action_Ring;
+namespace GalenaActionRing;
 
 public enum ActionType
 {

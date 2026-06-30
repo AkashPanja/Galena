@@ -1,11 +1,11 @@
-using System;
+﻿using System;
 using System.Diagnostics;
 using System.IO;
 using System.Threading.Tasks;
 using Microsoft.Win32;
 using Windows.ApplicationModel;
 
-namespace Galena_Action_Ring;
+namespace GalenaActionRing;
 
 public static class StartupService
 {
@@ -39,7 +39,7 @@ public static class StartupService
 
     public static bool IsEnabled()
     {
-        Log($"IsEnabled() — IsPackaged={IsPackaged}");
+        Log($"IsEnabled() â€” IsPackaged={IsPackaged}");
         if (IsPackaged)
         {
             try
@@ -76,7 +76,7 @@ public static class StartupService
 
     public static Task SetEnabledAsync(bool enable)
     {
-        Log($"SetEnabledAsync({enable}) — IsPackaged={IsPackaged}");
+        Log($"SetEnabledAsync({enable}) â€” IsPackaged={IsPackaged}");
         try
         {
             CleanupOldArtifacts();

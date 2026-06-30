@@ -1,9 +1,9 @@
-using System;
+﻿using System;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 
-namespace Galena_Action_Ring;
+namespace GalenaActionRing;
 
 internal static class BootstrapInitializer
 {

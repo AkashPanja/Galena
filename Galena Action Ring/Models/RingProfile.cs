@@ -1,7 +1,7 @@
-using System.Collections.Generic;
+﻿using System.Collections.Generic;
 using System.Text.Json.Serialization;
 
-namespace Galena_Action_Ring;
+namespace GalenaActionRing;
 
 public class RingProfile
 {

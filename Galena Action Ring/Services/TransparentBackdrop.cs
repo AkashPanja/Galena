@@ -1,11 +1,11 @@
-using Microsoft.UI.Composition;
+﻿using Microsoft.UI.Composition;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using System;
 using System.Runtime.InteropServices;
 using Windows.UI;
 
-namespace Galena_Action_Ring.Services;
+namespace GalenaActionRing.Services;
 
 internal class TransparentBackdrop : SystemBackdrop
 {
